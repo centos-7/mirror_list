@@ -1,0 +1,24 @@
+# RASDAEMON Motherboard DIMM labels Database file.
+#
+#  Vendor-name and model-name are found from the program 'dmidecode'
+#  labels are found from the silk screen on the motherboard.
+#
+#Vendor: <vendor-name>
+#  Product: <product-name>
+#  Model: <model-name>
+#    <label>:  <mc>.<top>.<mid>.<low>
+#      OR
+#    <label>:  <mc>.<row>.<channel>
+#
+
+Vendor: GIGABYTE
+
+  Model: MZ31-AR0-00, MZ31-AR0-HZ
+    DIMM_P0_A0: 1.0.0, 1.1.0; DIMM_P0_A1: 0.2.1, 0.3.1;
+    DIMM_P0_B0: 1.0.1, 1.1.1; DIMM_P0_B1: 1.2.1, 1.3.1;
+    DIMM_P0_C0: 0.0.1, 0.1.1; DIMM_P0_C1: 1.2.0, 1.3.0;
+    DIMM_P0_D0: 0.0.0, 0.1.0; DIMM_P0_D1: 0.2.0, 0.3.0;
+    DIMM_P0_E0: 3.0.0, 3.1.0; DIMM_P0_E1: 2.2.1, 2.3.1;
+    DIMM_P0_F0: 3.0.1, 3.1.1; DIMM_P0_F1: 3.2.1, 3.3.1;
+    DIMM_P0_G0: 2.0.1, 2.1.1; DIMM_P0_G1: 3.2.0, 3.3.0;
+    DIMM_P0_H0: 2.0.0, 2.1.0; DIMM_P0_H1: 2.2.0, 2.3.0;

@@ -1,0 +1,18 @@
+# RASDAEMON Motherboard DIMM labels Database file.
+#
+#  Vendor-name and model-name are found from the program 'dmidecode'
+#  labels are found from the silk screen on the motherboard.
+#
+#Vendor: <vendor-name>
+#  Product: <product-name>
+#  Model: <model-name>
+#    <label>:  <mc>.<top>.<mid>.<low>
+#      OR
+#    <label>:  <mc>.<row>.<channel>
+#
+
+Vendor: FUJITSU
+
+  Model: D3417-B1, D3417-B2
+    DIMM CHA3: 0.0.0, 0.1.0; DIMM CHA1: 0.2.0, 0.3.0;
+    DIMM CHB4: 0.0.1, 0.1.1; DIMM CHB2: 0.2.1, 0.3.1;
