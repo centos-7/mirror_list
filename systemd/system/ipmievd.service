@@ -1,0 +1,11 @@
+[Unit]
+Description=IPMI event daemon
+
+[Service]
+Type=forking
+EnvironmentFile=-/etc/default/ipmievd
+ExecStart=/usr/sbin/ipmievd $IPMIEVD_OPTIONS
+
+[Install]
+WantedBy=multi-user.target
+Alias=ipmi.service
