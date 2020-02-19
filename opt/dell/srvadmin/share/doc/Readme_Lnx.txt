@@ -1,0 +1,1 @@
+See the Dell OpenManage Server Administrator Installation Guide on the Dell Systems Management Tools and Documentation DVD or on the Dell Support website at http://support.dell.com/support/edocs/software/omswrels/index.htm

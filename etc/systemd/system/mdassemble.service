@@ -1,0 +1,12 @@
+[Unit]
+Description=mdassemble assembles all automatically detected mdadm arrays on boot after config generation.
+DefaultDependencies=no
+Wants=systemd-udevd.service
+After=mdrun.service
+Before=mdadm-raid.service rc-local.service
+
+[Service]
+Type=oneshot
+TimeoutSec=180
+RemainAfterExit=yes
+ExecStart=/sbin/mdadm --assemble --scan

@@ -1,0 +1,16 @@
+Dimension
+EC
+Inspiron
+Optiplex
+Precision
+SmartPC
+Studio
+Hybrid
+Vostro
+XPS
+Latitude
+SmartStep
+Portable
+Alienware
+Adamo
+SC

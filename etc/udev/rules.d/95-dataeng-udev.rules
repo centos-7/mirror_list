@@ -1,0 +1,37 @@
+###############################################################################
+#
+#          Dell Inc. PROPRIETARY INFORMATION
+# This software is supplied under the terms of a license agreement or
+# nondisclosure agreement with Dell Inc. and may not
+# be copied or disclosed except in accordance with the terms of that
+# agreement.
+#
+# Copyright (c) 2000-2011 Dell Inc. All Rights Reserved.
+#
+# Module Name:
+#
+#   dataeng-udev.rules
+#
+# Abstract/Purpose:
+#
+#   Systems Management Data Engine udev rules file
+#
+# Environment:
+#
+#   Linux
+#
+###############################################################################
+
+SUBSYSTEM=="pci", GOTO="srvadmin_dataeng_notify_pci"
+SUBSYSTEM=="usb", GOTO="srvadmin_dataeng_notify_usb"
+GOTO="srvadmin_dataeng_end"
+
+LABEL="srvadmin_dataeng_notify_pci"
+RUN+="/bin/sh -c '[ -x /opt/dell/srvadmin/sbin/dataeng.hotplug ] && /opt/dell/srvadmin/sbin/dataeng.hotplug pci'"
+GOTO="srvadmin_dataeng_end"
+
+LABEL="srvadmin_dataeng_notify_usb"
+RUN+="/bin/sh -c '[ -x /opt/dell/srvadmin/sbin/dataeng.hotplug ] && /opt/dell/srvadmin/sbin/dataeng.hotplug usb'"
+GOTO="srvadmin_dataeng_end"
+
+LABEL="srvadmin_dataeng_end"

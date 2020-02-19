@@ -1,0 +1,130 @@
+###############################################################################
+#
+#  MIME types and programs that process those types
+#
+#  Much of this file is generated automatically by the program "update-mime".
+#  Please see the "update-mime" man page for more information.
+#
+#  Users can add their own rules if they wish by creating a ".mailcap"
+#  file in their home directory.  Entries included there will take
+#  precedence over those listed here.
+#
+###############################################################################
+
+
+###############################################################################
+#
+#  User section follows:  Any entries included in this section will take
+#  precedence over those created by "update-mime".  DO NOT CHANGE the
+#  "User Section Begins" and "User Section Ends" lines, or anything outside
+#  of this section!
+#
+
+# ----- User Section Begins ----- #
+# -----  User Section Ends  ----- #
+
+###############################################################################
+
+text/plain; less '%s'; needsterminal
+application/x-troff-man; /usr/bin/man -X100 -l '%s'; test=test -n "$DISPLAY" -a -e /usr/bin/gxditview; description=Man page
+text/troff; /usr/bin/man -X100 -l '%s'; test=test -n "$DISPLAY" -a -e /usr/bin/gxditview; description=Man page
+application/x-troff-man; /usr/bin/man -l '%s'; needsterminal; description=Man page
+text/troff; /usr/bin/man -l '%s'; needsterminal; description=Man page
+text/html; /usr/bin/sensible-browser %s; description=HTML Text; nametemplate=%s.html
+application/x-troff-man; /usr/bin/nroff -mandoc -Tutf8; copiousoutput; print=/usr/bin/nroff -mandoc -Tutf8 | print text/plain:-
+text/troff; /usr/bin/nroff -mandoc -Tutf8; copiousoutput; print=/usr/bin/nroff -mandoc -Tutf8 | print text/plain:-
+application/x-info; /usr/bin/info -f '%s'; needsterminal; description=GNU Info document
+text/plain; more %s; needsterminal
+text/english; jmacs %s; needsterminal
+text/plain; jmacs %s; needsterminal
+text/x-makefile; jmacs %s; needsterminal
+text/x-c++hdr; jmacs %s; needsterminal
+text/x-c++src; jmacs %s; needsterminal
+text/x-chdr; jmacs %s; needsterminal
+text/x-csrc; jmacs %s; needsterminal
+text/x-java; jmacs %s; needsterminal
+text/x-moc; jmacs %s; needsterminal
+text/x-pascal; jmacs %s; needsterminal
+text/x-tcl; jmacs %s; needsterminal
+text/x-tex; jmacs %s; needsterminal
+application/x-shellscript; jmacs %s; needsterminal
+text/x-c; jmacs %s; needsterminal
+text/x-c++; jmacs %s; needsterminal
+text/english; joe %s; needsterminal
+text/plain; joe %s; needsterminal
+text/x-makefile; joe %s; needsterminal
+text/x-c++hdr; joe %s; needsterminal
+text/x-c++src; joe %s; needsterminal
+text/x-chdr; joe %s; needsterminal
+text/x-csrc; joe %s; needsterminal
+text/x-java; joe %s; needsterminal
+text/x-moc; joe %s; needsterminal
+text/x-pascal; joe %s; needsterminal
+text/x-tcl; joe %s; needsterminal
+text/x-tex; joe %s; needsterminal
+application/x-shellscript; joe %s; needsterminal
+text/x-c; joe %s; needsterminal
+text/x-c++; joe %s; needsterminal
+text/english; jpico %s; needsterminal
+text/plain; jpico %s; needsterminal
+text/x-makefile; jpico %s; needsterminal
+text/x-c++hdr; jpico %s; needsterminal
+text/x-c++src; jpico %s; needsterminal
+text/x-chdr; jpico %s; needsterminal
+text/x-csrc; jpico %s; needsterminal
+text/x-java; jpico %s; needsterminal
+text/x-moc; jpico %s; needsterminal
+text/x-pascal; jpico %s; needsterminal
+text/x-tcl; jpico %s; needsterminal
+text/x-tex; jpico %s; needsterminal
+application/x-shellscript; jpico %s; needsterminal
+text/x-c; jpico %s; needsterminal
+text/x-c++; jpico %s; needsterminal
+text/english; jstar %s; needsterminal
+text/plain; jstar %s; needsterminal
+text/x-makefile; jstar %s; needsterminal
+text/x-c++hdr; jstar %s; needsterminal
+text/x-c++src; jstar %s; needsterminal
+text/x-chdr; jstar %s; needsterminal
+text/x-csrc; jstar %s; needsterminal
+text/x-java; jstar %s; needsterminal
+text/x-moc; jstar %s; needsterminal
+text/x-pascal; jstar %s; needsterminal
+text/x-tcl; jstar %s; needsterminal
+text/x-tex; jstar %s; needsterminal
+application/x-shellscript; jstar %s; needsterminal
+text/x-c; jstar %s; needsterminal
+text/x-c++; jstar %s; needsterminal
+text/english; vim %s; needsterminal
+text/plain; vim %s; needsterminal
+text/x-makefile; vim %s; needsterminal
+text/x-c++hdr; vim %s; needsterminal
+text/x-c++src; vim %s; needsterminal
+text/x-chdr; vim %s; needsterminal
+text/x-csrc; vim %s; needsterminal
+text/x-java; vim %s; needsterminal
+text/x-moc; vim %s; needsterminal
+text/x-pascal; vim %s; needsterminal
+text/x-tcl; vim %s; needsterminal
+text/x-tex; vim %s; needsterminal
+application/x-shellscript; vim %s; needsterminal
+text/x-c; vim %s; needsterminal
+text/x-c++; vim %s; needsterminal
+text/html; /usr/bin/links %s; needsterminal; description=HTML Text; nametemplate=%s.html
+text/plain; view %s; edit=vim %s; compose=vim %s; test=test -x /usr/bin/vim; needsterminal
+text/html; /usr/bin/w3m -T text/html %s; needsterminal; description=HTML Text; nametemplate=%s.html
+text/html; /usr/bin/links -dump %s; copiousoutput; description=HTML Text; nametemplate=%s.html
+application/zip; unzip -l %s; nametemplate=%s.zip; copiousoutput
+text/plain; view %s; edit=vi %s; compose=vi %s; needsterminal
+text/html; /usr/bin/w3m -I %{charset} -dump -T text/html %s; copiousoutput; description=HTML Text; nametemplate=%s.html
+application/x-troff-man; /usr/bin/man -Tascii -l '%s' | col -b; copiousoutput; description=Man page
+text/troff; /usr/bin/man -Tascii -l '%s' | col -b; copiousoutput; description=Man page
+text/*; less '%s'; needsterminal
+text/*; view %s; edit=vim %s; compose=vim %s; test=test -x /usr/bin/vim; needsterminal
+application/x-info; /usr/bin/info --subnodes -o /dev/stdout -f '%s' 2>/dev/null; copiousoutput; description=GNU Info document
+application/x-tar; /bin/tar tvf '%s'; print=/bin/tar tvf - | print text/plain:-; copiousoutput
+application/x-gtar; /bin/tar tvf '%s'; print=/bin/tar tvf - | print text/plain:-; copiousoutput
+application/x-ustar; /bin/tar tvf '%s'; print=/bin/tar tvf - | print text/plain:-; copiousoutput
+text/*; more %s; needsterminal
+text/*; view %s; edit=vi %s; compose=vi %s; needsterminal
+application/vnd.debian.binary-package; /usr/lib/mime/debian-view %s; needsterminal; description=Debian GNU/Linux Package; nametemplate=%s.deb

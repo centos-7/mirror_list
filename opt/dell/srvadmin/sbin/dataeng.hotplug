@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+###############################################################################
+#
+#          Dell Inc. PROPRIETARY INFORMATION
+# This software is supplied under the terms of a license agreement or
+# nondisclosure agreement with Dell Inc. and may not
+# be copied or disclosed except in accordance with the terms of that
+# agreement.
+#
+# Copyright (c) 2000-2011 Dell Inc. All Rights Reserved.
+#
+# Module Name:
+#
+#   srvadmin-dataeng.hotplug
+#
+# Abstract/Purpose:
+#
+#   Systems Management Data Engine hotplug event script
+#
+# Environment:
+#
+#   Linux
+#
+###############################################################################
+
+SCRIPT_NAME=$(basename $0)
+OMREG_FILE="/etc/omreg.cfg"
+OMREG_DENG_CONFIGTOOL_KEY="OMDataEngine.configtool"
+
+# Check for omreg config file
+if [ ! -f ${OMREG_FILE} ];
+then
+	logger -t ${SCRIPT_NAME} "${OMREG_FILE} not found"
+	exit 1
+fi
+
+# Get Data Engine config tool from omreg config file
+DENG_CONFIGTOOL=$(grep "^${OMREG_DENG_CONFIGTOOL_KEY}=" ${OMREG_FILE} | sed "s/^.*=//")
+if [ -z "${DENG_CONFIGTOOL}" ];
+then
+	logger -t ${SCRIPT_NAME} "${OMREG_DENG_CONFIGTOOL_KEY} value not found"
+	exit 2
+fi
+if [ ! -x ${DENG_CONFIGTOOL} ];
+then
+	logger -t ${SCRIPT_NAME} "${DENG_CONFIGTOOL} not found"
+	exit 3
+fi
+
+
+###############################################################################
+# Function:    dataeng_hotplug_signal_event <event data>
+# Description: signal event to Data Engine daemons
+###############################################################################
+dataeng_hotplug_signal_event()
+{
+	${DENG_CONFIGTOOL} command=deviceevt "evtdata=$1"
+} # dataeng_hotplug_signal_event
+
+
+###############################################################################
+# Function:    dataeng_hotplug_handle_event_pci
+# Description: handle PCI hotplug event
+###############################################################################
+dataeng_hotplug_handle_event_pci()
+{
+	dataeng_hotplug_signal_event "${ACTION} pci ${PCI_ID} ${PCI_SUBSYS_ID}"
+} # dataeng_hotplug_handle_event_pci
+
+
+###############################################################################
+# Function:    dataeng_hotplug_handle_event_usb
+# Description: handle USB hotplug event
+###############################################################################
+dataeng_hotplug_handle_event_usb()
+{
+	if [ ! -z "${PRODUCT}" ];
+	then
+		dataeng_hotplug_signal_event "${ACTION} usb ${PRODUCT}"
+	fi
+} # dataeng_hotplug_handle_event_usb
+
+
+###############################################################################
+# Process hotplug event based on subsystem type
+###############################################################################
+case "$1" in
+	pci)
+		dataeng_hotplug_handle_event_pci
+		;;
+	usb)
+		dataeng_hotplug_handle_event_usb
+		;;
+esac
+
+exit 0
+
+
+###############################################################################
+# End Script
+###############################################################################
+

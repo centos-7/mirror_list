@@ -1,0 +1,121 @@
+#!/usr/bin/python
+
+import fnmatch
+import optparse
+import os
+import re
+import sys
+
+class Usage(Exception):
+    def __init__(self, msg = None, no_error = False):
+        Exception.__init__(self, msg, no_error)
+
+class skip(Exception): pass
+
+def parse_options(args):
+    parser = optparse.OptionParser()
+    fileopt = optparse.OptionGroup(parser, "Input/Output", "These options define the files to use. Input and output files are flat text files with name=value pairs and no sections as in [ini] files")
+    fileopt.add_option("-i", "--input-nv", type="string", dest="input", default=None, help="Input file")
+    fileopt.add_option("-o", "--output-nv", type="string", dest="output", default=None, help="Output file")
+    parser.add_option_group(fileopt)
+
+    migrateopt = optparse.OptionGroup(parser, "Migration", "These options define which keys/values to migrate.")
+    migrateopt.add_option("--equal-char", type="string", action="store", dest="equal", default='=', help="Set the equal character ('=') used when writing new file. Useful if file needs padding around equal (' = ').")
+    migrateopt.add_option("--filter-keys-input", type="string", action="append", dest="filter_keys_input", default=[], help="List keys to filter from input file while copying.")
+    migrateopt.add_option("--delete-keys-output", type="string", action="append", dest="delete_keys_output", default=[], help="List keys to delete from output file before copy.")
+    migrateopt.add_option("--copy-keys", type="string", action="append", dest="copy_keys", default=[], help="List keys to not migrate from input to output.")
+    parser.add_option_group(migrateopt)
+
+    (options, args) = parser.parse_args()
+
+    if options.input and not os.path.isfile(options.input):
+        raise Usage("Input NV '%s' does not exist" %(options.input,))
+
+    if not options.output or not os.path.isfile(options.output):
+        raise Usage("Output NV '%s' does not exist" %(options.output,))
+
+    return (options, args)
+
+
+def chomp(string):
+    if len(string) and string[-1] == "\n":
+        return string[:-1]
+    return string
+
+def load(filename, hash, comment=';#'):
+    #print "Load: %s" % filename
+    fd = open(filename, "r")
+    leadingspace = re.compile(r'^\s+')
+    trailingspace = re.compile(r'\s+$')
+    comment = re.compile(r'^\s*[%s].*' % comment)
+    equalspace = re.compile(r'(.*?)\s*=\s*')
+    nv = re.compile(r'(.*?)=(.*)')
+    while 1:
+	line = fd.readline()
+        if line == "": break
+        line = chomp(line)
+        #print "        LINE: '%s'" % line
+        line = comment.sub('', line)
+        line = leadingspace.sub('', line)
+        line = trailingspace.sub('', line)
+        line = equalspace.sub(r'\1=', line)
+        if line == "": continue
+        #print "   AFTER SUB: '%s'" % line
+        match = nv.match(line)
+        name = match.group(1)
+        value = match.group(2)
+        hash[name] = value
+    fd.close()
+
+def main():
+    try:
+        options, args = parse_options(sys.argv[1:])
+    except Usage, (msg, no_error):
+        out = sys.stderr
+        ret = 2
+        if no_error:
+            out = sys.stdout
+            ret = 0
+        if msg:
+            print >> out, msg
+        return ret
+
+    input = {}
+    if getattr(options, "input", None):
+        load(options.input, input)
+
+    output = {}
+    load(options.output, output)
+
+    for key_glob in options.delete_keys_output:
+        for key_to_del in fnmatch.filter(output.keys(), key_glob):
+            del(output[key_to_del])
+
+    for key_glob in options.copy_keys:
+        #print "COPY GLOB: %s" % key_glob
+        for key_to_copy in fnmatch.filter(input.keys(), key_glob):
+            #print "try copy %s" % key_to_copy
+            try:
+                for key_filter in options.filter_keys_input:
+                    #print "test filter %s" % key_filter
+                    if fnmatch.fnmatch(key_to_copy, key_filter):
+                        raise skip()
+            except skip:
+                #print "skipped"
+                continue
+            output[key_to_copy] = input[key_to_copy]
+
+    fd = open(options.output, "w+")
+    keys = output.keys()
+    keys.sort()
+    for key in keys:
+	value = output[key]
+        fd.write("%s%s%s\n" % (key, options.equal, value))
+    fd.close()
+
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+

@@ -1,0 +1,117 @@
+#!/usr/bin/python
+
+import ConfigParser
+import fnmatch
+import optparse
+import os
+import sys
+import re
+
+lines = list() 
+class Usage(Exception):
+    def __init__(self, msg = None, no_error = False):
+        Exception.__init__(self, msg, no_error)
+
+class skip(Exception): pass
+
+def parse_options(args):
+    parser = optparse.OptionParser()
+    fileopt = optparse.OptionGroup(parser, "Input/Output", "These options define the files to use.")
+    fileopt.add_option("-i", "--input-ini", type="string", dest="input", default=None, help="Input file")
+    fileopt.add_option("-o", "--output-ini", type="string", dest="output", default=None, help="Output file")
+    parser.add_option_group(fileopt)
+
+    migrateopt = optparse.OptionGroup(parser, "Input/Output", "These options define the files to use.")
+    migrateopt.add_option("--space-equal", action="store_true", dest="space", default=False, help="Put spaces before and after equal ('var = value') in output file.")
+    migrateopt.add_option("--no-space-equal", action="store_false", dest="space", help="Do not put spaces before and after equal ('var=value') in output file.")
+    migrateopt.add_option("--merge-section", type="string", action="append", dest="merge_sections", default=[], help="Take all keys in input section and copy to output section of same name, preserving keys in output section which are not in input.")
+    migrateopt.add_option("--delete-section", type="string", action="append", dest="delete_sections", default=[], help="Delete a section in the output.")
+    migrateopt.add_option("--filter-keys", type="string", action="append", dest="filter_keys", default=[], help="List keys to not migrate from input to output.")
+    migrateopt.add_option("--filter-section", type="string", action="append", dest="filter_sections", default=[], help="List sections to not migrate from input to output.")
+    parser.add_option_group(migrateopt)
+
+    (options, args) = parser.parse_args()
+
+    if options.input and not os.path.isfile(options.input):
+        raise Usage("Input INI '%s' does not exist" %(options.input,))
+
+    if not options.output or not os.path.isfile(options.output):
+        raise Usage("Output INI '%s' does not exist" %(options.output,))
+
+# Added to retain ini headers on upgrades
+    fd1 = open(options.input,"r+")
+
+    patt1 = re.compile(';') 
+    patt2 = re.compile('^[\s]+$')
+
+    for line in fd1:
+        if patt1.match(line) or patt2.match(line):
+            lines.append(line)		
+        else:
+            break
+		
+    fd1.close()
+    return (options, args)
+
+def main():
+    try:
+        options, args = parse_options(sys.argv[1:])
+
+		
+    except Usage, (msg, no_error):
+        out = sys.stderr
+        ret = 2
+        if no_error:
+            out = sys.stdout
+            ret = 0
+        if msg:
+            print >> out, msg
+        return ret
+
+
+    input = ConfigParser.ConfigParser()
+    input.optionxform=str
+    if getattr(options, "input", None):
+        input.read(options.input)
+
+    output = ConfigParser.ConfigParser()
+    output.optionxform=str
+    output.read(options.output)
+
+    for section in options.delete_sections:
+        for sect in fnmatch.filter(output.sections(), section):
+            output.remove_section(sect)
+
+    for section in options.merge_sections:
+        for sect in fnmatch.filter(input.sections(), section):
+            if not output.has_section(sect):
+                output.add_section(sect)
+	    for name in input.options(sect):
+                value = input.get(sect, name)
+                try:
+                    for filter in options.filter_sections:
+                        if fnmatch.fnmatch(sect,filter):
+                            raise skip()
+                    for filter in options.filter_keys:
+                        if fnmatch.fnmatch(name,filter):
+                            raise skip()
+                except (skip,):
+                    continue
+                output.set(sect, name, value)
+
+    fd = open(options.output, "w+")
+#for headers
+    for line in lines:
+		fd.write(line)
+    output.write(fd)
+    fd.close()
+    if not options.space:
+	import commands
+	commands.getstatusoutput("sed -i 's/\s*=\s*/=/' %s" % options.output)
+
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+

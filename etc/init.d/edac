@@ -1,0 +1,146 @@
+#!/bin/sh
+###############################################################################
+# $Id$
+###############################################################################
+# Copyright (C) 2006-2007 The Regents of the University of California.
+# Produced at Lawrence Livermore National Laboratory.
+# Written by Mark Grondona <mgrondona@llnl.gov>
+# UCRL-CODE-230739.
+# Modified by Yaroslav Halchenko <debian@onerussian.com> 2007 for Debian OS
+###############################################################################
+# chkconfig:      345 40 60
+###############################################################################
+### BEGIN INIT INFO
+# Provides:       edac
+# Required-Start: $remote_fs $time
+# Required-Stop: $remote_fs $time
+# Default-Start:  2 3 4 5
+# Default-Stop:   0 1 6
+# Short-Description: Initialize EDAC
+# Description:    Initialize EDAC: load DIMM labels into EDAC
+### END INIT INFO
+###############################################################################
+
+unset SERVICE
+
+SERVICE="edac"
+DESC="Memory Error Detection and Correction"
+prefix="/usr"
+exec_prefix="${prefix}"
+sbindir="${exec_prefix}/sbin"
+sysconfdir="/etc"
+edac_ctl="$sbindir/edac-ctl"
+
+PATH=/sbin:/usr/sbin:/usr/local/sbin:/bin:/usr/bin:/usr/local/bin
+STATUS=0
+
+###############################################################################
+
+# Don't need to source /etc/init.d/functions at this time
+
+# Read configuration to see if we need to load 
+#  EDAC_DRIVER 
+# 
+for dir in "$sysconfdir/default" "$sysconfdir/sysconfig"; do
+  [ -f "$dir/$SERVICE" ] && . "$dir/$SERVICE"
+done
+
+
+###############################################################################
+
+# Load the VERBOSE setting and other rcS variables
+. /lib/init/vars.sh
+
+# Define LSB log_* functions.
+. /lib/lsb/init-functions
+
+
+###############################################################################
+
+service_start ()
+{
+# Start the service.  Required by LSB.
+#
+# Assume that if EDAC_DRIVER is not set, then EDAC is configured
+#  automatically, thus return successfully, but don't do anything.
+#
+  if [ -n "$EDAC_DRIVER" ]; then
+     log_daemon_msg "Enabling ${DESC}" "$SERVICE"
+     modprobe $EDAC_DRIVER
+     STATUS=$?
+     case $STATUS in 
+       0) log_end_msg 0 ;;
+       5) log_failure_msg "No EDAC support for this hardware"; log_end_msg 1 ;;
+       *) log_failure_msg "failure with exit code $STATUS"; log_end_msg 1 ;;
+     esac
+  else
+      log_daemon_msg "Not enabling ${DESC} since EDAC_DRIVER is not set"
+      log_end_msg 0
+  fi
+  log_daemon_msg "Loading DIMM labels for ${DESC}" "$SERVICE"
+  $edac_ctl --register-labels --quiet
+  STATUS=$?
+  case $STATUS in
+   0) log_end_msg 0 ;;
+   *) log_failure_msg "failure with exit code $STATUS"; log_end_msg 1 ;;
+  esac
+}
+
+###############################################################################
+
+service_stop ()
+{
+  if [ -n "$EDAC_DRIVER" ]; then
+
+    modprobe -r $EDAC_DRIVER
+    STATUS=$?
+    case $STATUS in
+      0) log_end_msg 0 ;;
+      *) log_failure_msg "failure with exit code $STATUS"; log_end_msg 1 ;;
+    esac
+  else
+    [ "$VERBOSE" != no ] && log_daemon_msg "Not disabling $DESC since EDAC_DRIVER is not set" "$SERVICE"
+    # No need to complaint if no driver is provided
+    # STATUS=6
+  fi
+}
+
+###############################################################################
+
+service_status ()
+{
+# Print the current status of the service.  Required by LSB.
+#
+  log_daemon_msg "Status of $DESC"
+  $edac_ctl --status
+  STATUS=0
+}
+
+###############################################################################
+
+STATUS=4
+
+case "$1" in
+  start)
+    service_start
+    ;;
+  stop)
+    service_stop
+    ;;
+  status)
+    service_status
+    ;;
+  restart|force-reload)
+    log_daemon_msg "Forcing reload of drivers for $DESC" "${SERVICE}"
+    service_stop  || log_end_msg 1
+    service_start && log_end_msg 0 || log_end_msg 1
+    ;;
+  *)
+    COMMANDS="{start|stop|status|restart|force-reload}"
+    echo "Usage: $0 ${COMMANDS}" >&2
+    exit 3
+    ;;
+esac
+
+# exit $STATUS
+:

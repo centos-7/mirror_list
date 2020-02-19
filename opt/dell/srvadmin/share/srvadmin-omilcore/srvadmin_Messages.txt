@@ -1,0 +1,284 @@
+############################################################################
+# This file contains various messages that are displayed                   #
+# during installation time. At the time of build, patterns in the scripts  #
+# will get replaced by the appropriate below listed messages.              #
+#                                                                          #
+# This file is created as per CR19320.                                     #
+#                                                                          #
+############################################################################
+
+
+#-----------------------------------------------------------------------------------
+# Following messages correspond to "srvadmin-install.sh"
+#-----------------------------------------------------------------------------------
+
+PATTERN1:
+Server Administrator requires an OpenIPMI driver. Currently no OpenIPMI driver
+modules for the running kernel are installed on the system. OpenIPMI driver
+modules for the running kernel will be installed by ${OPENIPMI_SUBSTRING} OpenIPMI
+driver RPM.
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN2:
+Note that while TVM is currently active on this system, the system becomes an
+IPMI system when a Dell Remote Access Card III is installed. Even though IPMI
+is not currently active, an OpenIPMI driver must still be installed, in case
+you later install a Dell Remote Access Card III.
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN3:
+Server Administrator requires an OpenIPMI driver. Currently no OpenIPMI driver
+modules for the running kernel are installed on the system. However, a
+"sufficient" version of the OpenIPMI driver RPM is currently installed on the
+system. OpenIPMI driver modules for the running kernel will be installed by
+building and installing OpenIPMI driver modules using DKMS.
+EOM
+
+
+#-----------------------------------------------------------------------------------
+PATTERN4:
+Note that while TVM is currently active on this system, the system becomes an
+IPMI system when a Dell Remote Access Card III is installed. Even though IPMI
+is not currently active, an OpenIPMI driver must still be installed, in case
+you later install a Dell Remote Access Card III.
+EOM
+
+
+#-----------------------------------------------------------------------------------
+PATTERN5:
+Server Administrator requires a newer version of the OpenIPMI driver modules
+for the running kernel than are currently installed on the system. The OpenIPMI
+driver modules for the running kernel will be upgraded by ${OPENIPMI_SUBSTRING}
+OpenIPMI driver RPM.
+EOM
+
+
+#-----------------------------------------------------------------------------------
+PATTERN6:
+Note that while TVM is currently active on this system, the system becomes an
+IPMI system when a Dell Remote Access Card III is installed. Even though IPMI
+is not currently active, the OpenIPMI driver modules must still be upgraded,
+in case you later install a Dell Remote Access Card III.
+EOM
+
+
+#-----------------------------------------------------------------------------------
+PATTERN7:
+Server Administrator requires a newer version of the OpenIPMI driver modules
+for the running kernel than are currently installed on the system. However, a
+"sufficient" version of the OpenIPMI driver RPM is currently installed on the
+system. The OpenIPMI driver modules for the running kernel will be upgraded
+by building and installing OpenIPMI driver modules using DKMS.
+EOM
+
+
+#-----------------------------------------------------------------------------------
+PATTERN8:
+Note that while TVM is currently active on this system, the system becomes an
+IPMI system when a Dell Remote Access Card III is installed. Even though IPMI
+is not currently active, the OpenIPMI driver modules must still be upgraded,
+in case you later install a Dell Remote Access Card III.
+EOM
+
+
+#-----------------------------------------------------------------------------------
+PATTERN9:
+"$0":
+NOTE: This script could not stop the OpenIPMI device driver.
+You need to stop the OpenIPMI device driver before starting Server
+Administrator.
+You should stop any applications using the OpenIPMI driver and then attempt
+to stop the OpenIPMI device driver.
+EOM
+
+
+#-----------------------------------------------------------------------------------
+# Following messages correspond to "srvadmin-openipmi.sh".
+#-----------------------------------------------------------------------------------
+
+
+
+#-----------------------------------------------------------------------------------
+PATTERN10:
+" - Minimum driver note: Required min version of OpenIPMI driver = ${LOC_MIN_DRIVER_VERSION}
+ - Packaged driver note: Version of packaged OpenIPMI driver RPM = ${LOC_PACKAGED_DRIVER_VERSION}"
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN11:
+"Status: The OpenIPMI driver module is installed, and the version of the
+        installed OpenIPMI driver module is equal to or greater than the
+        minimum version of the OpenIPMI driver that is required by Systems
+        Management. Leave the installed OpenIPMI driver alone."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN12:
+"Recommended action: Do nothing."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN13:
+"Status: The OpenIPMI driver module is not installed.
+        The OpenIPMI driver RPM is not installed.
+        Install the OpenIPMI driver by installing the OpenIPMI driver RPM that
+        is packaged with Systems Management."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN14:
+"Recommended action: Execute the \'install\' command of this script to
+                    install the OpenIPMI driver RPM."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN15:
+"Status: The OpenIPMI driver module is installed, but the version of the
+        installed OpenIPMI driver module is either unknown or less than the
+        version of the OpenIPMI driver that is required by Systems Management.
+        The OpenIPMI driver RPM is not installed.
+        Upgrade the OpenIPMI driver by installing the OpenIPMI driver RPM that
+        is packaged with Systems Management."
+EOM
+
+
+#-----------------------------------------------------------------------------------
+PATTERN16:
+"Recommended action: Execute the \'install\' command of this script to
+                    install the OpenIPMI driver RPM."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN17:
+"Status: The OpenIPMI driver module is not installed.
+        The OpenIPMI driver RPM is installed, but the version of the
+        installed OpenIPMI driver RPM is either unknown or less than the
+        minimum version of the OpenIPMI driver that is required by Systems
+        Management.
+        Install the OpenIPMI driver by upgrading the OpenIPMI driver RPM with
+        the OpenIPMI driver RPM that is packaged with Systems Management."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN18:
+"Recommended action: Execute the \'install\' command of this script to
+                    upgrade the OpenIPMI driver RPM."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN19:
+"Status: The OpenIPMI driver module is installed, but the version of the
+        installed OpenIPMI driver module is either unknown or less than the
+        version of the OpenIPMI driver that is required by Systems Management.
+        Also, the OpenIPMI driver RPM is installed, but the version of the
+        installed OpenIPMI driver RPM is either unknown or less than the
+        minimum version of the OpenIPMI driver that is required by Systems
+        Management.
+        Upgrade the OpenIPMI driver by upgrading the OpenIPMI driver RPM with
+        the OpenIPMI driver RPM that is packaged with Systems Management."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN20:
+"Recommended action: Execute the \'install\' command of this script to
+                    upgrade the OpenIPMI driver RPM."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN21:
+"Status: The OpenIPMI driver module is not installed.
+        The OpenIPMI driver RPM is installed, and the version of the
+        installed OpenIPMI driver RPM is equal to or greater than the minimum
+        version of the OpenIPMI driver that is required by Systems Management.
+        However, kernel source for the running kernel is not installed;
+        therefore the OpenIPMI driver modules for the running kernel apparently
+        could not be built and installed by DKMS when the currently installed
+        OpenIPMI driver RPM was installed.
+        Install the OpenIPMI driver by installing kernel source for the running
+        kernel and then building and installing OpenIPMI driver modules for the
+        running kernel using DKMS."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN22:
+"Recommended action: Install the \'${GBL_KERNEL_SOURCE_RPM_NAME}\' RPM that is applicable
+                    to the running kernel. Then execute the \'install\' command
+                    of this script to build and install the OpenIPMI driver
+                    modules for the running kernel using DKMS."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN23:
+"Status: The OpenIPMI driver module is installed, but the version of the
+        installed OpenIPMI driver module is either unknown or less than the
+        version of the OpenIPMI driver that is required by Systems Management.
+        The OpenIPMI driver RPM is installed, and the version of the
+        installed OpenIPMI driver RPM is equal to or greater than the minimum
+        version of the OpenIPMI driver that is required by Systems Management.
+        However, kernel source for the running kernel is not installed;
+        therefore the OpenIPMI driver modules for the running kernel apparently
+        could not be built and installed by DKMS when the currently installed
+        OpenIPMI driver RPM was installed.
+        Upgrade the OpenIPMI driver by installing kernel source for the running
+        kernel and then building and installing OpenIPMI driver modules for the
+        running kernel using DKMS."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN24:
+"Recommended action: Install the \'${GBL_KERNEL_SOURCE_RPM_NAME}\' RPM that is applicable
+                    to the running kernel. Then execute the \'install\' command
+                    of this script to build and install the OpenIPMI driver
+                    modules for the running kernel using DKMS."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN25:
+"Status: The OpenIPMI driver module is not installed.
+        The OpenIPMI driver RPM is installed, and the version of the
+        installed OpenIPMI driver RPM is equal to or greater than the minimum
+        version of the OpenIPMI driver that is required by Systems Management.
+        Kernel source for the running kernel is currently installed, but
+        apparently kernel source for the running kernel was not installed when
+        the currently installed OpenIPMI driver RPM was installed. And
+        therefore the OpenIPMI driver modules for the running kernel could not
+        be built and installed by DKMS when the currently installed OpenIPMI
+        driver RPM was installed.
+        Install the OpenIPMI driver by building and installing the OpenIPMI
+        driver modules for the running kernel using DKMS."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN26:
+"Recommended action: Execute the \'install\' command of this script to
+                    build and install the OpenIPMI driver modules for the
+                    running kernel using DKMS."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN27:
+"Status: The OpenIPMI driver module is installed, but the version of the
+        installed OpenIPMI driver module is either unknown or less than the
+        version of the OpenIPMI driver that is required by Systems Management.
+        The OpenIPMI driver RPM is installed, and the version of the
+        installed OpenIPMI driver RPM is equal to or greater than the minimum
+        version of the OpenIPMI driver that is required by Systems Management.
+        Kernel source for the running kernel is currently installed, but
+        apparently kernel source for the running kernel was not installed when
+        the currently installed OpenIPMI driver RPM was installed. And
+        therefore the OpenIPMI driver modules for the running kernel could not
+        be built and installed by DKMS when the currently installed OpenIPMI
+        driver RPM was installed.
+        Upgrade the OpenIPMI driver by building and installing the OpenIPMI
+        driver modules for the running kernel using DKMS."
+EOM
+
+#-----------------------------------------------------------------------------------
+PATTERN28:
+"Recommended action: Execute the \'install\' command of this script to
+                    build and install the OpenIPMI driver modules for the
+                    running kernel using DKMS."
+EOM
+

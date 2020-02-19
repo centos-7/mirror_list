@@ -1,0 +1,7 @@
+#!/bin/sh
+
+#directly invoke idracadm7 - it will check for generation and invoke required binary
+
+exec /opt/dell/srvadmin/bin/idracadm7 "$@"
+
+

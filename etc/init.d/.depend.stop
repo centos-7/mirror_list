@@ -1,0 +1,16 @@
+TARGETS = nginx stunnel4 loadcpufreq cpufrequtils openipmi mdadm ipmievd uuidd haveged dsm_sa_ipmi edac lvm2-lvmpolld smartmontools dataeng urandom brightness instsvcdrv sendsigs umountnfs.sh rpcbind nfs-common hwclock.sh networking umountfs mdrun cryptdisks cryptdisks-early udev umountroot mdadm-waitidle halt reboot
+instsvcdrv: dataeng
+sendsigs: instsvcdrv openipmi mdadm ipmievd uuidd nginx dataeng haveged stunnel4 dsm_sa_ipmi edac
+umountnfs.sh: sendsigs instsvcdrv openipmi ipmievd uuidd nginx dataeng haveged stunnel4 dsm_sa_ipmi edac
+rpcbind: umountnfs.sh
+hwclock.sh: nfs-common uuidd edac
+networking: rpcbind umountnfs.sh nginx
+umountfs: hwclock.sh networking rpcbind umountnfs.sh instsvcdrv openipmi mdadm ipmievd uuidd nginx dataeng haveged stunnel4 dsm_sa_ipmi edac lvm2-lvmpolld urandom brightness
+mdrun: umountfs
+cryptdisks: umountfs
+cryptdisks-early: cryptdisks umountfs
+udev: cryptdisks-early mdrun
+umountroot: udev cryptdisks-early cryptdisks umountfs
+mdadm-waitidle: umountroot
+halt: mdadm-waitidle umountroot
+reboot: mdadm-waitidle umountroot

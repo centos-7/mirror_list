@@ -1,0 +1,103 @@
+add pci 8086:A13D 1734:121D
+add pci 8086:A149 1734:121D
+add pci 8086:A123 1734:121D
+add pci 8086:A118 1734:121D
+add pci 8086:191D 1734:121C
+add pci 8086:A131 1734:121D
+add pci 8086:A13A 1734:121D
+add pci 8086:A12F 1734:121D
+add pci 8086:15B7 1734:121F
+add pci 8086:1918 1734:121C
+add pci 8086:A121 1734:121D
+add pci 8086:A114 1734:121D
+bind pci 8086:A131 1734:121D
+bind pci 8086:1918 1734:121C
+add usb 1d6b/2/419
+add usb 1d6b/3/419
+add usb 1d6b/2/419
+add usb 1d6b/3/419
+bind pci 8086:A123 1734:121D
+add pci 1179:010F 1179:0001
+bind pci 1179:010F 1179:0001
+add pci 8086:A102 1734:121D
+add pci 1179:010F 1179:0001
+bind pci 1179:010F 1179:0001
+bind pci 8086:A102 1734:121D
+bind pci 8086:A13A 1734:121D
+unbind pci 8086:A13A 1734:121D
+change pci 8086:15B7 1734:121F
+change pci 8086:A114 1734:121D
+change pci 8086:A149 1734:121D
+change pci 8086:A12F 1734:121D
+change pci 8086:A13A 1734:121D
+change pci 8086:A121 1734:121D
+change pci 8086:A102 1734:121D
+change pci 8086:A118 1734:121D
+change pci 8086:191D 1734:121C
+change pci 8086:A123 1734:121D
+change pci 8086:A13D 1734:121D
+change pci 8086:A131 1734:121D
+change pci 8086:1918 1734:121C
+change usb 1d6b/2/419
+change usb 1d6b/3/419
+change usb 1d6b/3/419
+change usb 1d6b/2/419
+change pci 1179:010F 1179:0001
+change pci 1179:010F 1179:0001
+change pci 8086:A13A 1734:121D
+change pci 8086:A131 1734:121D
+change pci 8086:1918 1734:121C
+change pci 8086:A118 1734:121D
+change pci 8086:A102 1734:121D
+change pci 8086:A114 1734:121D
+change pci 8086:A13D 1734:121D
+change pci 8086:15B7 1734:121F
+change pci 8086:A123 1734:121D
+change pci 8086:A149 1734:121D
+change pci 8086:191D 1734:121C
+change pci 8086:A121 1734:121D
+change pci 8086:A12F 1734:121D
+change pci 1179:010F 1179:0001
+change pci 1179:010F 1179:0001
+change usb 1d6b/2/419
+change usb 1d6b/3/419
+change usb 1d6b/2/419
+change usb 1d6b/3/419
+change pci 8086:A131 1734:121D
+change pci 8086:A12F 1734:121D
+change pci 8086:A102 1734:121D
+change pci 8086:A13D 1734:121D
+change pci 8086:1918 1734:121C
+change pci 8086:A114 1734:121D
+change pci 8086:A149 1734:121D
+change pci 8086:A121 1734:121D
+change pci 8086:A13A 1734:121D
+change pci 8086:191D 1734:121C
+change pci 8086:A123 1734:121D
+change pci 8086:15B7 1734:121F
+change usb 1d6b/3/419
+change pci 8086:A118 1734:121D
+change usb 1d6b/2/419
+change pci 1179:010F 1179:0001
+change usb 1d6b/3/419
+change pci 1179:010F 1179:0001
+change usb 1d6b/2/419
+change pci 8086:A13A 1734:121D
+change pci 8086:1918 1734:121C
+change pci 8086:A102 1734:121D
+change pci 8086:A114 1734:121D
+change pci 8086:A12F 1734:121D
+change pci 8086:A13D 1734:121D
+change pci 8086:A118 1734:121D
+change pci 8086:A121 1734:121D
+change pci 8086:A149 1734:121D
+change pci 8086:A131 1734:121D
+change pci 8086:A123 1734:121D
+change pci 8086:191D 1734:121C
+change pci 8086:15B7 1734:121F
+change usb 1d6b/2/419
+change usb 1d6b/3/419
+change pci 1179:010F 1179:0001
+change usb 1d6b/2/419
+change pci 1179:010F 1179:0001
+change usb 1d6b/3/419

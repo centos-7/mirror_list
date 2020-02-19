@@ -1,0 +1,14 @@
+# This is a list of supported systems that are either:
+# a) TVM systems that do not support IPMI, or
+# b) TVM systems that can also support IPMI via a DRAC3 card.
+# Do not edit this list.  Hex Characters must be in upper case!
+
+[TVMOnlySystems]
+0124=PE1655MC=TVM_ONLY
+0134=PE600SC=TVM_ONLY
+
+[TVMAndIPMISystems]
+0141=PE650=TVM_AND_IPMI
+0135=PE1600SC=TVM_AND_IPMI
+0165=PE750=TVM_AND_IPMI
+0167=PE700SC=TVM_AND_IPMI

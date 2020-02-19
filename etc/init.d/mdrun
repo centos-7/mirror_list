@@ -1,0 +1,53 @@
+#!/bin/sh
+
+# Generate new configuration file and start all arrays
+
+### BEGIN INIT INFO
+# Provides:          mdrun
+# Required-Start:    mountkernfs hostname udev
+# Should-Start:      udev devfsd
+# X-Start-Before:    checkfs mountall mdadm-raid
+# Required-Stop:     mountkernfs
+# Should-Stop:       udev devfsd
+# X-Stop-After:      umountfs
+# Default-Start:     S
+# Default-Stop:      0 6
+# Short-Description: MD array assembly
+# Description:       This script forces regeneration of mdadm.conf and starts all detected arrays 
+### END INIT INFO
+set -eu
+
+CONFIG=/etc/mdadm/mdadm.conf
+MKCONF=/usr/share/mdadm/mkconf
+
+. /lib/lsb/init-functions
+
+test -x "$MKCONF" || exit 0
+
+case "${1:-}" in
+  start)
+    log_daemon_msg "Generating mdadm.conf" "mkconf" || true
+	if ! grep -q '^ARRAY' $CONFIG 2>/dev/null; then
+	  $MKCONF force-generate || ret=$?
+	  case ${ret:-0} in
+	    0) 
+	      log_end_msg 0 || true
+	      ;;
+	    *)
+	      log_progress_msg "(creation failed)"
+	      log_end_msg 1 || true
+	      ;;
+	  esac
+	else
+	  log_progress_msg "(ARRAYs defined)"
+	  log_end_msg 1 || true
+	fi
+  ;;
+  stop)
+    :
+  ;;
+  *)
+    echo "usage: $(basename $0)  [ start | stop ]"
+  ;;
+esac
+

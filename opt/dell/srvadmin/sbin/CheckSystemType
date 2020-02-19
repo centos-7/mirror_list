@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+###############################################################################
+#
+#          Dell Inc. PROPRIETARY INFORMATION
+#
+#  This software is supplied under the terms of a license agreement or
+#  nondisclosure agreement with Dell Inc. and may not
+#  be copied or disclosed except in accordance with the terms of that
+#  agreement.
+#
+#  Copyright (c) 2000-2009 Dell Inc. All Rights Reserved.
+#
+#
+#  Revision:
+#    $Revision: $
+#
+#  Last Modified By / On:
+#    $Author: $ / $Date: $
+#
+#  Author:
+#    OpenManage Install
+#
+#  Environment:
+#    Linux
+#
+#  User/Kernel Mode:
+#    User
+#
+#  Abstract/Purpose:
+#    Functions used by OM components to decide the type of system.
+#
+#  See Also:
+#
+#
+#  Notes:
+#
+#
+###############################################################################
+export LANG=en_US.utf8
+
+TRUE=0
+FALSE=1
+NON_DELL=1
+LOWER_GENERATION=2
+CLIENT_SYSTEM=3
+SUPPORTED_DELL_SERVER=0
+SYSCHECK_OVERRIDE_FILE="/opt/dell/srvadmin/lib64/openmanage/IGNORE_GENERATION"
+MIN_12G_SYSID_HEX=0x048C
+GBL_MIN_SYSID=016C
+
+SMBIOS_UTIL=/usr/sbin/smbios-sys-info-lite
+CLIENT_SYSTEM_LIST=/opt/dell/srvadmin/share/srvadmin-omilcore/ClientSystemList.txt
+SYSTEM_LIST=/opt/dell/srvadmin/share/srvadmin-omilcore/syslist.txt
+
+# Check whether this utility is executed by install scripts.
+# If so, SMBIOS_UTIL & CLIENT_SYSTEM_LIST have to be picked from a
+# different location
+if [ -n "$1" ] && [ -n "$2" ] && [ -d "$2" ]; then
+   if [ "$1" == "dvd" ] || [ "$1" == "DVD" ]; then
+         # Getting executed from install script.
+         SUPPORT_DIR=`echo "$2" | sed "s/ /\\\ /"`
+         SMBIOS_UTIL="$SUPPORT_DIR/smbios-sys-info-lite"
+         CLIENT_SYSTEM_LIST="$SUPPORT_DIR/ClientSystemList.txt"
+         SYSTEM_LIST="$SUPPORT_DIR/syslist.txt"
+   fi
+fi
+
+#use OM_SYSTEM_ID if defined else find system id using smbios-util
+if [ -n "${OM_SYSTEM_ID}" ]
+then
+        SYSID_HEX="0x${OM_SYSTEM_ID}"
+else
+        SYSID_HEX=`"$SMBIOS_UTIL" | grep "^System ID" | awk -F":" '{print $2}'`
+fi
+
+SYSID=`echo $SYSID_HEX|sed 's/0x//g'|sed 's/ //g'`
+
+#############
+## CheckForOverride()
+## Function to check whether override is enabled.
+## If enabled, then return 0.
+#############
+CheckForOverride() 
+{
+   [ ! -f ${SYSCHECK_OVERRIDE_FILE} ] || return $TRUE
+   [ "${IGNORE_GENERATION}" != "1" ] || return $TRUE
+   return $FALSE
+}
+
+#############
+## IsDELLSystem()
+## Function to check whether it is a DELL system and then return 0.
+## It can be a server or a client system
+#############
+IsDELLSystem() 
+{
+   "$SMBIOS_UTIL" | grep "OEM String 1" | awk -F":" '{print $2}' | grep -qi "Dell"
+   if [ "$?" = "0" ]; then
+       return $TRUE
+   else
+       return $FALSE
+   fi
+}
+
+####################################
+#Detect if the server is in supported server range
+IsInSupportedServerRange()
+{
+        MIN_SYSID_HEX="0x$1"
+        if [  "$2" != "" ]; then
+                MAX_SYSID_HEX="0x$2"
+        fi
+
+        SYSID_DEC=`printf "%d"  $SYSID_HEX`
+
+        MIN_SYSID_DEC=`printf "%d" $MIN_SYSID_HEX`
+
+        if [ $SYSID_DEC -ge $MIN_SYSID_DEC ]; then
+                if [ -n $MAX_SYSID_HEX ]; then
+                        MAX_SYSID_DEC=`printf "%d" $MAX_SYSID_HEX`
+                        if [ $SYSID_DEC -le $MAX_SYSID_DEC ]; then
+                                return $TRUE
+                        fi
+                else
+                        return $TRUE
+                fi
+        else
+                return $FALSE
+        fi
+}
+
+
+####################################
+#Detect if the system id is in supported sysid list
+IsInSupportedSystemIDs()
+{
+	#checking if the system sysid matches with ShoeMaker sysid. changes for OM911 - allow installation only on ShoeMaker
+	if [ ${SYSID} == "07FC" ] || [ ${SYSID} == "0838" ]; then
+        return $TRUE
+    else
+        return $FALSE
+    fi
+    grep -i "${SYSID}=" ${SYSTEM_LIST} > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+       return $TRUE
+    fi
+	
+	#MIN_SYSID=`grep -i "^>" ${SYSTEM_LIST}|sed "s#>##g" 2>/dev/null`
+	MIN_SYSID=$GBL_MIN_SYSID
+	MAX_SYSID=`grep -i "^<" ${SYSTEM_LIST}|sed "s#<##g" 2>/dev/null`
+	if [ -n $MIN_SYSID ] ; then
+			IsInSupportedServerRange $MIN_SYSID $MAX_SYSID && return $TRUE
+	fi
+	
+	return $FALSE
+}
+
+#############
+## IsClientSystem()
+## Compares the product name with all client systems
+## If any matches, then it is a client system and return TRUE.
+#############
+IsClientSystem()
+{
+    PRODUCT_NAME=`"$SMBIOS_UTIL" | grep "Product Name" | awk -F":" '{print $2}'`
+
+    if [ -n "${PRODUCT_NAME}" ] && [ -f "$CLIENT_SYSTEM_LIST" ]; then
+        for client_name in `cat "$CLIENT_SYSTEM_LIST"`
+        do
+            echo $PRODUCT_NAME | grep -qwi $client_name
+            if [ "$?" = "0" ]; then
+                return $TRUE
+            fi
+        done
+
+        # Not a client system
+        return $FALSE
+    fi
+
+    #Not able to find the product name
+    #Assume it is a client system.
+    return $TRUE
+}
+
+#############
+## IsThisSupportedGeneration()
+## Function to check whether it is a DELL server of supported generation.
+## If yes, then return 0; else return 1.
+#############
+IsThisSupportedGeneration()
+{
+    CheckForOverride && return $SUPPORTED_DELL_SERVER
+
+    if [ ! -x "$SMBIOS_UTIL" ]; then
+        echo "$SMBIOS_UTIL does not exist. Not able to proceed."
+        return $FALSE
+    fi
+	
+    IsDELLSystem || return $NON_DELL
+
+    IsInSupportedSystemIDs && return $SUPPORTED_DELL_SERVER
+
+    IsClientSystem && return $CLIENT_SYSTEM
+
+    return $LOWER_GENERATION
+}

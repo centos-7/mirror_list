@@ -1,0 +1,15 @@
+[Unit]
+Description=mdrun create mdadm.conf on boot for assembly.
+DefaultDependencies=no
+#Wants=systemd-udevd.service
+Requires=systemd-udevd.service
+After=systemd-udevd.service systemd-udev-settle.service sysinit.target
+Before=mdadm-raid.service
+ConditionPathIsReadWrite=/etc
+
+[Service]
+Type=oneshot
+TimeoutSec=180
+RemainAfterExit=yes
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/share/mdadm/mkconf force-generate

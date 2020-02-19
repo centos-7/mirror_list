@@ -1,0 +1,15 @@
+# This is a list of 8G systems supported by Dell OpenManage
+# Do not edit this list.  Hex Characters must be in upper case!
+# 06/11/04
+016C=PE1850
+016D=PE2850
+016E=PE2800
+016F=PE6800
+0170=PE6850
+0183=PE1800
+0185=PE0800
+018A=PE1855
+01B6=PE850
+01B7=PE830
+01E6=PE860
+01E7=PE840

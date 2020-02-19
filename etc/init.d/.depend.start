@@ -1,0 +1,5 @@
+TARGETS = killprocs console-setup.sh openipmi mdadm instsvcdrv ipmievd uuidd haveged dsm_sa_ipmi edac lvm2-lvmpolld single smartmontools bootlogs rsync sysstat rmnologin dbus cron ssh stop-bootlogd rasdaemon dataeng rc.local
+INTERACTIVE = console-setup.sh
+single: killprocs
+dataeng: instsvcdrv
+rc.local: dataeng openipmi mdadm ipmievd uuidd haveged dsm_sa_ipmi edac lvm2-lvmpolld smartmontools bootlogs rsync sysstat rmnologin dbus cron ssh stop-bootlogd rasdaemon console-setup.sh

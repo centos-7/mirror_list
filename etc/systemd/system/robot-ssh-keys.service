@@ -1,0 +1,11 @@
+[Unit]
+Description=Hetzner Robot API SSH Keys Tasks
+Wants=sshd-keygen.target
+After=network.target sshd-keygen.target fetch-robot-config.service
+Before=ssh.service
+
+[Service]
+Type=oneshot
+TimeoutSec=180
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/robot-ssh-keys

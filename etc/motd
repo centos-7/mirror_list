@@ -1,0 +1,17 @@
+
+-------------------------------------------------------------------
+
+  Welcome to the Hetzner Rescue System.
+
+  This Rescue System is based on Debian 10 (buster) with a custom
+  kernel. You can install software as in a normal system.
+
+  To install a new operating system from one of our prebuilt
+  images, run 'installimage' and follow the instructions.
+
+  More information at http://wiki.hetzner.de
+
+-------------------------------------------------------------------
+
+Rescue System up since 2020-02-19 00:32 +01:00
+

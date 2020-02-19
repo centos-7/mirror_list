@@ -1,0 +1,13 @@
+# This is a list of iDRAC systems supported by Dell OpenManage
+# Do not edit this list.  Hex Characters must be in upper case!
+# 06/18/2008
+0235=PER710
+0236=PER610
+0237=PET610
+0287=PEM610
+029C=PEM710
+028C=PER410
+028D=PET410
+029B=PET710
+0290=NX3000
+0292=NX1000
