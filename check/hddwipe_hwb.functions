@@ -1,0 +1,294 @@
+#!/bin/bash
+
+#
+# this script DELETES the harddisk(s) of this machine
+#
+# david.mayr@hetzner.de - 2008.10.28
+#
+# edit by patrick.tausch@hetzner.de - 2014.06.10
+#   - add parameter to change the wipe mode 
+#   - export into functions
+
+
+# send abort status, if signal catched
+#
+abort() {
+  echo_red '\n\nABORTING ...\n' 1>&2
+}
+
+
+main_wipe(){
+local force="$1"
+if [ "$2" ]; then
+  MODE="HWB"
+fi
+
+echo_yellow "\n=====  HARDDISK WIPE - DELETE ALL HARDDISKS  =====\n"
+
+trap "abort ; kill -9 $$" 1 2 9 15
+
+## stop test, if hddwipe is not allowed
+#if ! hddwipe_allowed ; then
+#  echo_red "HDD wiping is not allowed - server seems not to be cancelled since at least 48 hours. ABORT."
+#  sleep 1
+#  exit 0
+#fi
+
+# if no disks found, return error
+if [ -z "$(get_hdd)" ] ; then
+  echo_red "No disks found!  Abort ..."
+  send hddwipe-result "ERROR" "NO_DISKS_FOUND" "dummy"
+  exit 1
+fi
+
+
+STARTTIME="$(date +%d.%m.\ %H:%M)"
+echo_grey "START: $STARTTIME"
+
+
+# prepare screenrc
+#
+screenrc="/tmp/screenrc-$(basename $0)-$$"
+cat <<EOF >$screenrc
+## zombie on
+caption always "%{WB}%?%-Lw%?%{kw}%n*%f %t%?(%u)%?%{WB}%?%+Lw%?%{Wb}"
+hardstatus alwayslastline "%{= RY}%H %{BW} %l %{bW} %c %M %d%="
+
+EOF
+# add screen windows with erase commands
+for hdd in $(get_hdd lines | cut -d: -f1) ; do
+  serials=$(get_all_hdd_serials | grep $hdd | cut -d: -f2)
+  [ -z "$serials" ] && serials="RAID"
+  serials_combined=$(echo $serials | sed "s/ /_/g")
+  [ -z "$serials_combined" ] && serials_combined="RAID"
+  size=$(get_hdd_size /dev/$hdd)
+  cache=$(get_hdd_cache /dev/$hdd)
+  cacheMB="$[$cache/1024]M"
+  model=$(get_hdd_model /dev/$hdd)
+  model_text="$model (${cache}K)"
+  mac="$(get_mac)"
+  echo "screen -t $hdd bash -c 'bash $PWD/hddwipe_eraser_hwb.sh /dev/$hdd \"$(echo $serials)\" $MODE |  \
+    tee $LOGDIR/hddwipe-$serials_combined.log ; sleep 2'" >> $screenrc
+done
+
+
+# ask if disk(s) should really be deleted - unless "force" param used
+#
+[ "$force" = "force" ] || ask_hddwipe
+
+# start erasing in a screen session: start screen and stay attached
+#
+sleep 1
+screen -mS $(basename $0) -c $screenrc
+rm $screenrc
+rm $LOGDIR/hddwipe-*.log
+
+# end
+ENDTIME="$(date +%H:%Mh)"
+echo_grey "END: $ENDTIME"
+}
+
+
+
+#
+#
+# eraser.functions
+
+
+# send abort status, if signal catched
+#
+abort_eraser() {
+  echo_red '\n\nABORTING ...\n' 1>&2
+  sleep 1
+}
+
+# define erase function
+#
+erase() {
+  [ $# -ne 4 ] && return "PARAM ERROR"
+  my_disk=$1
+  my_pattern=$2
+  my_size=$3
+  my_text=$4
+  count=0
+  countfile="/tmp/$(basename $0)_count_$(basename $my_disk)_$$"
+  echo 1 > $countfile
+  until false ; do
+  #until [ $count -gt 10 ] ; do
+    count=$[$count+1]
+    # output data
+    cat $PWD/data/hddwipe.${my_pattern} ; EXITCODE=$?
+    # break if disk is full
+    if [ $EXITCODE -ne 0 ] ; then
+      echo $count > $countfile
+      break
+    fi
+  # write data
+  done | pv -brtpe -s${my_size}K -i1 -N"$my_text" | dd of=$my_disk bs=1M conv=fdatasync 2>&1 
+  # check if we really filled up the disk
+  count="$(cat $countfile)"
+  [ $[$count*1024] -lt $my_size ] && return 1 || return 0
+  sleep 2
+}
+
+main_wipe_eraser(){
+# get some important data about the disk
+#
+if [ "$1" -a "$2" ] ; then
+  disk="$1"
+  serials="$2"
+else
+  echo "Usage:  $0  </dev/your_disk> <serial(s)>"
+  exit 1
+fi
+
+if [ "$3" ]; then
+  MODE="$3"
+else
+  MODE="$HDDWIPE_MODE"
+fi
+
+size=$(get_hdd_size $disk)
+sizeKB=$(get_hdd_size $disk kb)
+cache=$(get_hdd_cache $disk)
+cacheMB="$[$cache/1024]M"
+model=$(get_hdd_model $disk)
+model_text="$model (${cache}K)"
+mac="$(get_mac)"
+
+trap "abort_eraser ; kill -9 $$" 1 2 9 15
+
+# wait some time before starting, to have a chance to cancel ...
+#
+echo_red "DISK  $disk  will be DELETED in $HDDWIPE_SLEEP seconds!\nPress CTRL-C to abort now! "
+sleep_dots $HDDWIPE_SLEEP ; echo
+
+
+# set mode
+#
+case $MODE in
+  DoD5220.22-M-E)
+    steps=3
+    patterns="10101010 random 01010101"
+  ;;
+  DoD5220.22-M-ECE)
+    steps=7
+    patterns="10101010 random 01010101 random 10101010 random 01010101"
+  ;;
+  VSTIR)
+    steps=7
+    patterns="00000000 11111111 00000000 11111111 00000000 11111111 10101010"
+  ;;
+  HWB)
+    steps=1
+    patterns="01010101"
+  ;;
+  *)
+    echo_red "Illegal mode! see $0 ..."
+    exit 1
+  ;;
+esac
+
+# start erasing
+#
+c=0
+ERRORMSG=""
+STARTTIME="$(date +%d.%m.\ %H:%M)"
+echo_green "\nUsing $MODE mode, time is now $STARTTIME"
+echo_yellow "Start $disk ($(echo $model | sed 's/%20/ /g') [$serials] $(echo $size | cut -d: -f2))"
+time1=$(date +%s)
+for pattern in $patterns ; do
+  c=$[$c+1]
+  CURTIME="$(date +%d.%m.\ %H:%M)"
+  text="$(basename $disk)/$serials - run $c/$steps ($pattern)"
+  echo_cyan "\n$text"
+  erase $disk $pattern $sizeKB "$text" ; ERROR=$?
+  if [ "$ERROR" -ne 0 ]; then
+    ERRORMSG="${ERRORMSG}Error at step $c, "
+    echo "hdd_wipe:error:$disk:$disk Error at step $c" >> $ROBOT_LOGFILE
+  fi
+done
+
+
+echo " "
+ 
+#Check Wipe
+  #Find out the sector count
+    sectors=$(hdparm -g $disk | grep sector | tr "," "\n" | grep sectors | cut -d' ' -f4)
+
+  #Calculate the middle and the last 512 Bytes
+    middle="$(echo "$sectors/2" | bc -l | cut -d'.' -f1)"
+    last="$(echo "$sectors-10240" | bc -l)"
+  #Read the first 5M
+    dd if=$disk bs=512 count=10240 of=/tmp/testfile-$serial
+    if [ -e /tmp/testfile-$serial ]; then
+      if [ -n "$(diff /tmp/testfile-$serial /root/.oldroot/nfs/check/data/hddwipe_checkfile_5M)" ]; then
+        echo "hdd_wipe:error:$disk:$disk MBR Wipe FAILED" >> $ROBOT_LOGFILE
+        echo "HDD_WIPE_CHECK: MBR: $disk Wipe FAILED"
+        ERRORMSG="${ERRORMSG}MBR-Check: Not Wiped!!, " 
+      else
+        echo "HDD_WIPE_CHECK: MBR: $disk Wipe OK" 
+      fi  
+    else
+      ERRORMSG="${ERRORMSG}File Error MBR-Check, "
+      echo "HDD_WIPE_CHECK: MBR: $disk File Error - Check FAILED"
+      echo "hdd_wipe:error:$disk:$disk MBR: File Error - Check FAILED" >> $ROBOT_LOGFILE
+    fi
+
+    rm /tmp/testfile-$serial
+  #Read the middle 5M
+    dd if=$disk bs=512 count=10240 of=/tmp/testfile-$serial skip=$middle
+    if [ -e /tmp/testfile-$serial ]; then
+      if [ -n "$(diff /tmp/testfile-$serial /root/.oldroot/nfs/check/data/hddwipe_checkfile_5M)" ]; then
+        echo "hdd_wipe:error:$disk:$disk Middle Wiped FAILED" >> $ROBOT_LOGFILE
+        echo "HDD_WIPE_CHECK: Middle: $disk Wipe FAILED"
+        ERRORMSG="${ERRORMSG}Middle-Check: Not Wiped!!, " 
+      else
+        echo "HDD_WIPE_CHECK: Middle: $disk Wipe OK" 
+      fi
+    else
+      ERRORMSG="${ERRORMSG}File Error Middle-Check!!, "
+      echo "HDD_WIPE_CHECK: Middle: $disk File Error - Check FAILED"
+      echo "hdd_wipe:error:$disk:$disk Middle: File Error - Check FAILED" >> $ROBOT_LOGFILE
+    fi
+
+    rm /tmp/testfile-$serial
+  #Read the last 5M
+    dd if=$disk bs=512 count=10240 of=/tmp/testfile-$serial skip=$last
+    if [ -e /tmp/testfile-$serial ]; then
+      if [ -n "$(diff /tmp/testfile-$serial /root/.oldroot/nfs/check/data/hddwipe_checkfile_5M)" ]; then
+        echo "hdd_wipe:error:$disk:$disk End Wipe FAILED" >> $ROBOT_LOGFILE
+        echo "HDD_WIPE_CHECK: End: $disk Wipe FAILED"
+        ERRORMSG="${ERRORMSG}End-Check: Not Wiped!!, " 
+      else
+        echo "HDD_WIPE_CHECK: End: $disk Wipe OK"
+      fi
+    else
+      ERRORMSG="${ERRORMSG}File Error End-Check!!, "
+      echo "HDD_WIPE_CHECK: End: $disk File Error - Check FAILED"
+      echo "hdd_wipe:error:$disk:$disk End: File Error - Check FAILED" >> $ROBOT_LOGFILE
+    fi
+
+    rm /tmp/testfile-$serial
+
+
+
+ENDTIME="$(date +%d.%m.\ %H:%M)"
+time2=$(date +%s)
+
+
+# send result status
+#
+echo_yellow "\nErasing finished at $ENDTIME, sending status ...\n"
+if [ -z "$ERRORMSG"  ] ; then
+  echo "Ok"
+else
+  echo_red "$ERRORMSG"
+  for serial in $serials ; do
+    echo -e "HDDWIPE: Errors detected" >> $LOGDIR/test_error.log
+  done
+fi
+
+sleep 2
+}
+

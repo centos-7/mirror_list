@@ -1,0 +1,5 @@
+KERNEL=="nvme?n1", SUBSYSTEM=="block", ACTION=="add", RUN+="/root/.oldroot/nfs/check/hwb/run_nvme_in_screen.sh add %k %p"
+KERNEL=="nvme??n1", SUBSYSTEM=="block", ACTION=="add", RUN+="/root/.oldroot/nfs/check/hwb/run_nvme_in_screen.sh add %k %p"
+
+KERNEL=="nvme?n1", SUBSYSTEM=="block", ACTION=="remove", RUN+="/root/.oldroot/nfs/check/hwb/run_nvme_in_screen.sh remove %k %p"
+KERNEL=="nvme??n1", SUBSYSTEM=="block", ACTION=="remove", RUN+="/root/.oldroot/nfs/check/hwb/run_nvme_in_screen.sh remove %k %p"

@@ -1,0 +1,168 @@
+#!/bin/bash
+
+#
+# this file contains all funkction für the menu.sh script
+# changes on them will not disturbe running checks
+#
+# patrick.tausch@hetzner.de - 2013.11.26
+# jukka.lehto@hetzner.com - 2018.9.25 - modified from /root/.oldroot/nfs/check/menu.funtions for wiping disks without confirmation
+#
+
+#
+# add var for wipe wrapper
+#WIPE_WRAPPER="$PWD/hddwipe.sh"
+WIPE_WRAPPER="$PWD/hddwipe_wrapper.sh"
+
+function check_special_settings {
+  # change settings in some special cases
+  # memtest is activated
+  if [ "$1" == "memtest" ]; then
+    DEFAULT=2
+    ROBOT_TEST_RESULT_URL="$2"
+  # stresstest is activated
+  elif [ "$1" == "stresstest" ]; then
+    DEFAULT=K
+    STRESSTEST_DURATION=$2
+    HDDTEST_MODE=$3
+    HDDTEST_READ_MODE=$4
+    ROBOT_TEST_RESULT_URL="$5"
+  elif [ "$1" == "stresswipe" ]; then
+    DEFAULT=C
+    HDDWIPE_FORCED="force" 
+    STRESSTEST_DURATION=$2
+    STRESSTEST_MODE=$3
+    HDDTEST_READ_MODE=$4
+    ROBOT_TEST_RESULT_URL="$5"
+  fi
+  [ -z "$HDDTEST_MODE" -o "$HDDTEST_MODE" = "-" ] && HDDTEST_MODE="long"
+}
+
+function check_hwcheck_mode {
+  case "$1" in
+    hddwipe) 
+      DEFAULT=U
+      HDDWIPE_FORCED="force"
+    ;;
+    hddwipe_unattended) DEFAULT=V ;;
+    hddwipe_teststation) DEFAULT=C ;;
+    hddwipe_teststation_forced) 
+      DEFAULT=C
+      HDDWIPE_FORCED="force" 
+    ;;
+    hddwipe_teststation_forced_stress) 
+      DEFAULT=C
+      HDDWIPE_FORCED="force" 
+    ;;
+    stresstest_teststation) 
+      DEFAULT=L
+      STRESSTEST_DURATION="1440"
+      STRESSTEST_MODE="ro"
+      HDDTEST_READ_MODE="standard"
+    ;;
+    secwipe)
+      DEFAULT=A
+      touch /tmp/secwipe_stats
+    ;;
+  esac
+}
+
+function check_stresstest_mode(){
+  if [ -n "$STRESSTEST_MODE" ]; then
+    if [[ "$STRESSTEST_MODE" =~ [Rr|Ww] ]]; then
+      STRESSTEST_MODE="--destructive"
+    fi
+    if [[ "$STRESSTEST_MODE" =~ [Rr|Oo] ]]; then
+      STRESSTEST_MODE=""
+    fi
+  fi
+}
+
+function check_stresstest_defaults_wipe(){
+  [ -z "$STRESSTEST_DURATION" -o "$STRESSTEST_DURATION" = "-" ] && STRESSTEST_DURATION=1440
+  [ -z "$STRESSTEST_MODE" -o "$STRESSTEST_MODE" = "-" ] && STRESSTEST_MODE="--destructive"
+  [ -z "$HDDTEST_READ_MODE" -o "$HDDTEST_READ_MODE" = "-" ] && HDDTEST_READ_MODE="standard"
+}
+
+function check_stresstest_defaults_upfront(){
+  [ -z "$STRESSTEST_DURATION" -o "$STRESSTEST_DURATION" = "-" ] && STRESSTEST_DURATION=1440
+  [ -z "$STRESSTEST_MODE" -o "$STRESSTEST_MODE" = "-" ] && STRESSTEST_MODE="--destructive"
+  [ -z "$HDDTEST_READ_MODE" -o "$HDDTEST_READ_MODE" = "-" ] && HDDTEST_READ_MODE="full"
+}
+
+function check_stresstest_defaults_kunde(){
+  [ -z "$STRESSTEST_DURATION" -o "$STRESSTEST_DURATION" = "-" ] && STRESSTEST_DURATION=120
+  [ -z "$STRESSTEST_MODE" -o "$STRESSTEST_MODE" = "-" ] && STRESSTEST_MODE=""
+  [ -z "$HDDTEST_READ_MODE" -o "$HDDTEST_READ_MODE" = "-" ] && HDDTEST_READ_MODE="standard"
+}
+
+function main {
+
+  #
+  # send reset to new.rz-admin
+  send2 reset
+
+  # prepare log-directory
+  #
+  mkdir -p $LOGDIR
+
+  # send information about this computer to the monitor server ...
+  #
+  # send hwdata to new.rz-admin
+  echo_grey "\nsend hardware information to rz-admin ..."
+  $PWD/report.sh
+
+  $PWD/unlock_hdd.sh
+
+  # start sending periodic livesigns
+  #
+  ps c | grep periodic || $PWD/periodic_livesign.sh
+
+  # beep once
+  #
+  beep4
+
+  # default mode
+  #
+  MODE="$1"
+
+  # read the robot url where the test should be reported
+  ROBOT_TEST_RESULT_URL="$2"
+
+  DEFAULT=K
+
+  check_special_settings $2 $3 $4 $5 $6
+
+  check_hwcheck_mode $MODE
+  
+  check_stresstest_mode
+
+  # display menu
+  #
+
+  $PWD/reset_status.sh
+  $PWD/hddtest_smart_v2.0.4.sh -m short -n 1
+  $MYPWD/stop_raid.sh
+  $PWD/wipe.sh "force"
+  $MYPWD/wipe_usb.sh
+  $MYPWD/short_test_force.sh
+  $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-first
+  $PWD/hddtest_smart_v2.0.4.sh -m long -n 2
+  $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-last
+  $PWD/stresstest_compare_hdd_values.sh
+  $PWD/dmesg.sh
+  $PWD/stresstest_result.sh
+
+  SUMMARY_LOG="$(send2 get_summary)"
+
+  fancheck_result="$(echo "$SUMMARY_LOG" | sed -ne 's/FANCHECK:\ \(.*\)/\1/p' | tr '[:upper:]' '[:lower:]')"
+  echo "fancheck:$fancheck_result" >> $ROBOT_LOGFILE
+
+  SUMMARY="$(send2 summary)"
+
+  if [ "$(echo $SUMMARY | grep -i error)" ]; then
+    echo "hwc-summary:error" >> $ROBOT_LOGFILE
+  fi
+  if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+    send_robot_test_result $ROBOT_TEST_RESULT_URL
+  fi
+}

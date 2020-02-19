@@ -1,0 +1,316 @@
+#!/bin/bash
+
+abort() {
+  echo_red '\n\nABORTING ...\n' 1>&2
+  send2 update_status $TEST_ID "ABORTED"
+  sleep 1
+}
+
+check_parameter() {
+  if [ -z "$DURATION_MIN" ]; then
+    echo -e "wrong parameter\n"
+    echo "Usage: stresstest.sh <duration> [ <ro|rw> ]"
+    echo "ro|rw = stresstest in destructive mode (write on hdd) or not"
+    exit
+  fi
+}
+
+
+function main() {
+
+ARGS=`getopt -o d:c: --long duration:,destructive,ignore-error,cpu: -- "$@"`
+
+#Bad arguments
+if [ $? -ne 0 ]; then
+    exit 1
+fi
+
+# A little magic
+eval set -- "$ARGS"
+
+while true; do
+  case "$1" in
+    -c|--cpu) if [ -n "$2" ]; then
+        CPU_CORE_COUNT=$2
+        shift 2
+      else
+        exit 1
+      fi
+      ;;
+    -d|--duration) if [ -n "$2" ]; then
+        DURATION_MIN=$2
+         shift 2
+       else
+         exit 1
+       fi
+       ;;
+    --destructive) if [ -n "$2" ]; then
+         destructive_opt="--destructive"
+         shift
+       fi
+       ;;
+    --ignore-error)
+       IGNORE_ERROR=true
+       shift
+       ;;
+    --) shift ; break ;;
+    *) echo "Internal error!" ; exit 1 ;;
+  esac
+done
+
+
+# report rz-admin.new start signal
+local TEST_ID="$(send2 stresstest WORKING started)"
+send2 test_log_json "$TEST_ID" "{\"duration\":\"$DURATION_MIN\"}" > /dev/null
+
+# exit on 32 bit system
+if [ "$(uname -m)" == "i686" ]; then
+  send2 finished $TEST_ID
+  exit 1
+fi
+
+#
+# if another test is failed exit
+if [ -z $IGNORE_ERROR ] && [ -n "$(cat $LOGDIR/test_error.log)" ]; then
+  echo "another test is failed exit"
+  send2 update_status $TEST_ID "ABORTED"
+  exit 1
+fi
+
+
+STARTTIME="$(date +%H:%Mh)"
+
+#
+# convert duration from minutes to seconds
+let DURATION_SEC=$DURATION_MIN*60
+
+
+trap "abort ; kill -9 $$" 1 2 9 15
+check_parameter
+
+echo_yellow "\n=====  Stresstest  =====\n"
+echo_grey "START: $STARTTIME"
+
+echo -e "Stresstest\n$STARTTIME\nDuration: $DURATION_MIN minutes\n\n" > $LOGDIR/stressapptest.log
+
+# send start signal to RZ admin
+echo_white "Starting Stresstest\n"
+
+# get free memory
+free_m="$(echo $(($(grep -i MemFree /proc/meminfo | sed -ne 's/.* \([0-9]\+\) .*/\1/p')/1024)))"
+if [ "$free_m" -gt "125000" ]; then
+  free_m="$(($free_m-8192))"
+else
+  free_m="$(($free_m-1024))"
+fi
+
+if [ "$free_m" -lt "0" ]; then
+ free_m=0
+fi
+
+send2 test_log_json "$TEST_ID" "{\"calculated_memory\":\"$free_m\"}" > /dev/null
+if [ -n "$free_m" ]; then
+  free_m="-M $free_m"
+fi
+
+if [ -z "$CPU_CORE_COUNT" ]; then
+  CORES=1
+elif [ "$CPU_CORE_COUNT" = "all" ]; then
+  CORES="$(grep processor /proc/cpuinfo | wc -l)"
+else
+  [[ $CPU_CORE_COUNT =~ ^-?[0-9]+$ ]] && CORES=$CPU_CORE_COUNT || CORES=1
+fi
+
+disk_count="$(get_disks | wc -l)"
+
+#hdd config
+for hdd in $(get_all_hdd_types | sed -e 's/ *$//g' -e 's/ /\n/g' | cut -d: -f2); do
+  hdd_command="$hdd_command -d /dev/$hdd"
+done
+
+# start temp logger
+echo "true" > $LOGDIR/stresstest-temp.run
+$PWD/stresstest_temp_log.sh &
+
+# start stresstest
+stress_command="$free_m -m $CORES -C $CORES $hdd_command --cache-size 64mb --random-threads 1 $destructive_opt -v 4 -l $LOGDIR/stressapptest-full.log -s $DURATION_SEC"
+# compatibility because old rescue does not support the new stressapptest version
+if $(grep -q squeeze /proc/cmdline); then
+  stressapptest $stress_command
+else
+  $PWD/bin/stressapptest $stress_command
+fi
+
+STRESSTEST_STATS="$(cat $LOGDIR/stressapptest-full.log | sed -n $(grep -n Found $LOGDIR/stressapptest-full.log | cut -d: -f1)',$p')"
+
+# stop temp logger
+echo "false" > $LOGDIR/stresstest-temp.run
+LOG_STILL_RUNNING="true"
+while [ "$LOG_STILL_RUNNING" == "true" ]; do
+  sleep 2
+  PROCESSLIST="$(ps a)"
+  if [ -z "$(echo "$PROCESSLIST" | grep stresstest_temp_log.sh)" ]; then
+    LOG_STILL_RUNNING="false"
+  fi
+done
+
+# check core temp log
+local maxtemp=$(get_processor_temp_limit)
+TEMP_ERROR_LOG=''
+for temp_log in $(cat $LOGDIR/stresstest-temp.log | sort -nr | uniq -c | sed -e 's/^ *//g;s/ /:/g'); do
+  count=$(echo $temp_log | cut -d: -f1)
+  temp=$(echo $temp_log | cut -d: -f2)
+  if [ -n "$temp" ] && [ "$temp" -gt "$maxtemp" ]; then
+    TEMP_ERROR_LOG="$TEMP_ERROR_LOG$count x $temp grad celsius measured\n"
+  fi
+done
+
+# send extra temp values to rz-admin
+local temp_count="$(cat $LOGDIR/stresstest-temp.log | wc -l)"
+local temp_min="$(cat $LOGDIR/stresstest-temp.log | sed -e 's/+//g' | sort -n | head -n 1)"
+local temp_max="$(cat $LOGDIR/stresstest-temp.log | sed -e 's/+//g' | sort -nr | head -n 1)"
+local temp_avg_all="$(awk '{ total += $1; count++ } END { printf "%.2f", total/count }' $LOGDIR/stresstest-temp.log )"
+local temp_avg_over="$(awk '{if($0>75) { total += $1; count++ } } END { avg = total/count; if(avg=='-nan') { print 0 } else { printf "%.2f", avg } }' $LOGDIR/stresstest-temp.log)"
+
+# send complete senssors log
+local sensors_logfile="sensors-log.log"
+
+sensors > $LOGDIR/$sensors_logfile
+if [ ! -s $LOGDIR/$sensors_logfile ]; then
+  echo "empty" > $LOGDIR/$sensors_logfile
+fi
+send2 test_log_raw "$TEST_ID" "lm-sensors-log" "$LOGDIR/$sensors_logfile" > /dev/null
+
+# send ipmi sensors log if available
+local ipmi_sensors_logfile="ipmi-sensors-log.log"
+
+if [ -e /dev/ipmi0 ]; then
+  ipmitool sensor list > $LOGDIR/$ipmi_sensors_logfile
+  if [ ! -s $LOGDIR/$ipmi_sensors_logfile ]; then
+    echo "empty" > $LOGDIR/$ipmi_sensors_logfile
+  fi
+fi
+send2 test_log_raw "$TEST_ID" "ipmitool_temp_log" "$LOGDIR/$ipmi_sensors_logfile" > /dev/null
+
+# send fan speed measurements
+send_fan_speed_measurements "$TEST_ID"
+
+#FANCHECK_RESULT="$(send2 summary 2>&1 | grep ^FANCHECK: | cut -d : -f 2)"
+echo "fancheck:$FANCHECK_RESULT"
+
+#
+# report core temperatures
+local CPUTEMP_ID="$(send2 cputemp WORKING started)"
+send2 test_log_json "$CPUTEMP_ID" "{\"Count\":\"$temp_count\",\"MIN\":\"$temp_min\",\"MAX\":\"$temp_max\",\"AVG_ALL\":\"$temp_avg_all\",\"AVG-Over\":\"$temp_avg_over\"}" > /dev/null
+echo "count:temperature in °C" > $LOGDIR/stresstest-temp-srt.log
+cat $LOGDIR/stresstest-temp.log | sort -nr | uniq -c | sed -e 's/^ *//g;s/ /:/g' | head -n 10 >> $LOGDIR/stresstest-temp-srt.log
+send2 test_log_raw "$CPUTEMP_ID" "temperatur_log" "$LOGDIR/stresstest-temp-srt.log" > /dev/null
+send2 finished "$CPUTEMP_ID" > /dev/null
+send2 update_message "$CPUTEMP_ID" "finished" > /dev/null
+
+# save TEMP_ERROR_LOG
+if [ -n "$TEMP_ERROR_LOG" ]; then
+  if [ "$maxtemp" -gt "75" ]; then
+    TEMP_ERROR="ERROR"
+  else
+    TEMP_ERROR="WARNING"
+  fi
+  #echo -e "\nTemperatur Log: ERROR (Core temperature above 75 grad celsius)\n\n$TEMP_ERROR_LOG" > $LOGDIR/stresstest-temp-error.log
+  TEMP_Log="Temperatur Log:\t$TEMP_ERROR (Core temperature above $maxtemp grad celsius)\n\n$TEMP_ERROR_LOG"
+  echo "Temperatur Log $TEMP_ERROR (Core temperature above $maxtemp grad celsius)" >> $LOGDIR/test_error.log
+else
+  TEMP_ERROR=''
+  #echo -e "\nTemperatur Log OK\nCore temperature NOT above 75 grad celsius\n\n" > $LOGDIR/stresstest-temp-error.log
+  TEMP_Log="Temperatur Log:\tOK (Core temperature NOT above $maxtemp grad celsius)\n\n"
+fi
+
+
+# send log to rzadmin
+tail -n 1000 $LOGDIR/stressapptest-full.log | grep -v "Log:" > $LOGDIR/stressapptest-rzadmin.log
+send2 test_log_raw "$TEST_ID" "stresstest_log" "$LOGDIR/stressapptest-rzadmin.log" > /dev/null
+
+######## short turbostat test ########
+cpu_cores="$(grep "processor" /proc/cpuinfo | wc -l)"
+
+# stress cpu
+stress --quiet --cpu $cpu_cores --timeout 190s &
+
+sleep 5
+# start tubnóstat to collect data
+/root/.oldroot/nfs/tools/turbostat --interval 2 --quiet --show Bzy_MHz --show TSC_MHz --show CoreTmp --Summary --num_iterations 90 -o /tmp/turbostat.log
+sleep 5
+
+min=10000
+base=0
+tempmin=10000
+tempmax=0
+
+#remove header from file
+sed -e '1,2d' < /tmp/turbostat.log > /tmp/turbostat_rh.log
+
+while read -r line; do
+  t_min=$(echo $line | cut -d' ' -f1)
+  t_base=$(echo $line | cut -d' ' -f2)
+  t_temp=$(echo $line | cut -d' ' -f3)
+
+  [ $t_min -lt $min ] && min=$t_min
+  [ $t_base -gt $base ] && base=$t_base
+  [ $t_temp -lt $tempmin ] && tempmin=$t_temp
+  [ $t_temp -gt $tempmax ] && tempmax=$t_temp
+done < /tmp/turbostat_rh.log
+
+echo "__MIN_CLOCK: $min" > $LOGDIR/cpufreq.log
+echo "__BASE_CLOCK: $base" >> $LOGDIR/cpufreq.log
+echo "__CORE_TEMP_MIN: $tempmin" >> $LOGDIR/cpufreq.log
+echo "__CORE_TEMP_MAX: $tempmax" >> $LOGDIR/cpufreq.log
+
+send2 test_log_raw "$TEST_ID" "__cpufreq_debug" "$LOGDIR/cpufreq.log" > /dev/null
+
+rm /tmp/turbostat.log /tmp/turbostat_rh.log
+######## short turbostat test ########
+
+send2 finished "$TEST_ID" > /dev/null
+send2 update_message "$TEST_ID" "finished" > /dev/null
+
+
+# check stressapptest log
+STRESS_LOG="$(cat $LOGDIR/stressapptest-full.log | tail -n11)"
+
+if [ "$(echo "$STRESS_LOG" | grep Status | grep -i pass)" ]; then
+  STRESS_ERROR=''
+elif [ "$(echo "$STRESS_LOG" | grep Status | grep FAIL)" ]; then
+  STRESS_ERROR="error"
+else
+  STRESS_ERROR="error"
+  STRESSTEST_STATS="STRESSTEST ABORDED DURING INTERNAL ERROR"
+fi
+
+# write result log
+
+echo -e "Stresstest\n$STARTTIME\nDuration: $DURATION_MIN minutes\n\n" > $LOGDIR/stressapptest.log
+if [ -n "$STRESS_ERROR" ]; then
+  echo -e "Stresstest: Failed\n" >> $LOGDIR/test_error.log 
+  echo -e "STRESSTEST:\tERROR see logs below\n##################### STRESSTEST-STATS #####################\n$STRESSTEST_STATS\n\n##################### STRESSTEST-ERRORS #####################\n$(grep "^Hardware Error" $LOGDIR/stressapptest-full.log | uniq)\n$(grep "^Report Error" $LOGDIR/stressapptest-full.log | uniq)\n$(grep "^Page Error" $LOGDIR/stressapptest-full.log | uniq)\n" >> $LOGDIR/stressapptest.log
+  echo "stresstest:error - Check FAILED" >> $ROBOT_LOGFILE
+else
+  echo -e "STRESSTEST:\tOK\n##################### STRESSTEST-STATS #####################\n$STRESSTEST_STATS" >> $LOGDIR/stressapptest.log
+fi
+
+# create stresstest-cpu-temp log
+echo -e "Stresstest-CPU-Temp\n$(date)\nDuration: $DURATION_MIN minutes\n\n$TEMP_Log" > $LOGDIR/stresstest-temp-error.log
+if [ "$TEMP_ERROR" = '' ]; then
+  #send stresstest-temp-result "OK" "Finished [$STARTTIME - $(date +%H:%Mh)]" "-"
+  echo "stresstest-temperature:ok" >> $ROBOT_LOGFILE
+fi
+if [ "$TEMP_ERROR" = 'WARNING' ]; then
+  #send stresstest-temp-result "WARNING" "Finished [$STARTTIME - $(date +%H:%Mh)]" "-"
+  echo "stresstest-temperature:warning" >> $ROBOT_LOGFILE
+fi
+if [ "$TEMP_ERROR" = 'ERROR' ]; then
+  #send stresstest-temp-result "ERROR" "Finished [$STARTTIME - $(date +%H:%Mh)]" "-"
+  echo "stresstest:error" >> $ROBOT_LOGFILE
+fi
+
+# clean up log files
+#rm $LOGDIR/stresstest*
+}

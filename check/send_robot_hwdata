@@ -1,0 +1,24 @@
+#!/bin/bash
+
+source /root/.oldroot/nfs/check/config
+source /root/.oldroot/nfs/check/report.function
+
+if ( [ -z "$1" ] || [ -z "$2" ] ); then
+  echo "Usage: send_robot_hwdata \"action\" \"ROBOT-URL\""
+  exit 1
+fi
+
+ACTION="$1"
+ROBOT_URL="$2"
+
+#
+# wipe partition table if stresstestwipe follows
+if [ "$ACTION" == "bios_update_started_stresstestwipe" ]; then
+  for disk in $(get_disks); do 
+    DISK="$(echo $disk | cut -d: -f1 | cut -d/ -f3)"
+    sgdisk -Z /dev/$DISK
+  done
+fi
+
+
+send_robot_hw_data "$ACTION" "$ROBOT_URL"

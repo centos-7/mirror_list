@@ -1,0 +1,570 @@
+#!/bin/bash
+
+#
+# this file contains all funkction für the menu.sh script
+# changes on them will not disturbe running checks
+#
+# patrick.tausch@hetzner.de - 2013.11.26
+#
+
+#
+# add var for wipe wrapper
+#WIPE_WRAPPER="$PWD/hddwipe.sh"
+WIPE_WRAPPER="$PWD/hddwipe_wrapper.sh"
+
+function check_special_settings {
+  # change settings in some special cases
+  # memtest is activated
+  if [ "$1" == "memtest" ]; then
+    DEFAULT=2
+    ROBOT_TEST_RESULT_URL="$2"
+  # stresstest is activated
+  elif [ "$1" == "stresstest" ]; then
+    DEFAULT=K
+    STRESSTEST_DURATION=$2
+    HDDTEST_MODE=$3
+    HDDTEST_READ_MODE=$4
+    ROBOT_TEST_RESULT_URL="$5"
+  elif [ "$1" == "stresswipe" ]; then
+    DEFAULT=C
+    HDDWIPE_FORCED="force"
+    STRESSTEST_DURATION=$2
+    STRESSTEST_MODE=$3
+    HDDTEST_READ_MODE=$4
+    ROBOT_TEST_RESULT_URL="$5"
+  fi
+  [ -z "$HDDTEST_MODE" -o "$HDDTEST_MODE" = "-" ] && HDDTEST_MODE="long"
+}
+
+function check_hwcheck_mode {
+  case "$1" in
+    hddwipe)
+      DEFAULT=U
+      HDDWIPE_FORCED="force"
+    ;;
+    hddwipe_unattended) DEFAULT=V ;;
+    hddwipe_teststation) DEFAULT=C ;;
+    hddwipe_teststation_forced)
+      DEFAULT=C
+      HDDWIPE_FORCED="force"
+    ;;
+    hddwipe_teststation_forced_stress)
+      DEFAULT=C
+      HDDWIPE_FORCED="force"
+    ;;
+    stresstest_teststation)
+      DEFAULT=L
+      STRESSTEST_DURATION="1440"
+      STRESSTEST_MODE="ro"
+      HDDTEST_READ_MODE="standard"
+    ;;
+    secwipe)
+      DEFAULT=A
+      touch /tmp/secwipe_stats
+    ;;
+  esac
+}
+
+function check_stresstest_mode(){
+  if [ -n "$STRESSTEST_MODE" ]; then
+    if [[ "$STRESSTEST_MODE" =~ [Rr|Ww] ]]; then
+      STRESSTEST_MODE="--destructive"
+    fi
+    if [[ "$STRESSTEST_MODE" =~ [Rr|Oo] ]]; then
+      STRESSTEST_MODE=""
+    fi
+  fi
+}
+
+function check_stresstest_defaults_wipe(){
+  [ -z "$STRESSTEST_DURATION" -o "$STRESSTEST_DURATION" = "-" ] && STRESSTEST_DURATION=1440
+  [ -z "$STRESSTEST_MODE" -o "$STRESSTEST_MODE" = "-" ] && STRESSTEST_MODE="--destructive"
+  [ -z "$HDDTEST_READ_MODE" -o "$HDDTEST_READ_MODE" = "-" ] && HDDTEST_READ_MODE="standard"
+}
+
+function check_stresstest_defaults_upfront(){
+  [ -z "$STRESSTEST_DURATION" -o "$STRESSTEST_DURATION" = "-" ] && STRESSTEST_DURATION=1440
+  [ -z "$STRESSTEST_MODE" -o "$STRESSTEST_MODE" = "-" ] && STRESSTEST_MODE="--destructive"
+  [ -z "$HDDTEST_READ_MODE" -o "$HDDTEST_READ_MODE" = "-" ] && HDDTEST_READ_MODE="full"
+}
+
+function check_stresstest_defaults_kunde(){
+  [ -z "$STRESSTEST_DURATION" -o "$STRESSTEST_DURATION" = "-" ] && STRESSTEST_DURATION=120
+  [ -z "$STRESSTEST_MODE" -o "$STRESSTEST_MODE" = "-" ] && STRESSTEST_MODE=""
+  [ -z "$HDDTEST_READ_MODE" -o "$HDDTEST_READ_MODE" = "-" ] && HDDTEST_READ_MODE="standard"
+}
+
+function renametab {
+  # function to rename the tab of the screen
+  screen -X title "$1"
+}
+
+function display_menu {
+echo_green "\n\n
+  HARDWARE CHECK Menu
+  -------------------"
+echo_white "
+         1: HDD Test (SMART Self-test long)
+         5: RAID Check
+         D: DMESG Check
+         G: HDD Test (SMART Self-test short)
+         K: Stresstest 2h  (incl. 1 5 D)
+         L: Stresstest 24h (incl. 1 5 D)
+
+   (*)   T: Short-Test"
+if [ "$SPECIAL_HWBAU" == "true" ]; then
+  echo_white "         E: Hard-drive Short-Test"
+fi
+echo_white "
+   (*)   X: Delete Partitiontable
+   (*)   Y: WIPE all hard-drives (fast)
+   (*)   W: WIPE all hard-drives (secure!)  Mode=DoD5220.22-M-E
+
+  - Combinations:
+
+   (*)   Z: HDDwipe ( W ) and Stresstest 24h ( L )
+   (*)   V: HDDwipe ( W ) and Stresstest 24h ( L )
+            WITHOUT confirmation, IF server is canceled more than 48h ago!
+   (*)   C: HDDwipe ( W ) and Stresstest 24h ( L )
+            Use only for teststations! Manual confirmation required."
+
+if [ "$RAID_CTRL_UPDATES_ALLOWED" = "yes" ]; then
+  echo_white "
+ - Raid Controller Updates:
+         M: 3ware Update
+         O: Adaptec Update
+         Q: LSI Update"
+fi
+
+echo_white "
+  - System:
+         I: Hardware Informations
+         S: Reset Test-Status
+         H: Shutdown Computer
+         R: Reboot Computer
+         P: Pause
+
+   (*) Hard-drives will be erased!
+
+
+Automatic selection after $MENUWAIT seconds: $DEFAULT
+
+"
+[ "$HDD_TESTS_ACTIVE" = "true" ] && echo_red "\nACHTUNG: destruktive Festplattentests sind aktiviert!\n"
+}
+
+function get_menu_answer {
+  # get answer
+  #
+  echo -n "Your choice: "
+  read -t$MENUWAIT -n1 ANSWER
+  [ -z "$ANSWER" ] && ANSWER=$DEFAULT
+  echo
+}
+
+function start_selected_check {
+case "$ANSWER" in
+  p|P|0)
+    :
+  ;;
+  1)
+    renametab "1: HDD  Test"
+    $PWD/reset_status.sh
+    $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long #!
+  ;;
+  5)
+    renametab "5: RAID Test"
+    $PWD/reset_status.sh
+    $PWD/3waretest.sh
+    $PWD/adaptectest.sh
+    $PWD/lsitest.sh
+  ;;
+  d|D)
+    renametab "D: DMESG Check"
+    $PWD/reset_status.sh
+    $PWD/dmesg.sh
+  ;;
+  h|H)
+    halt
+  ;;
+  r|R)
+    reboot
+  ;;
+  i|I)
+    $PWD/show_info.sh
+  ;;
+  t|T)
+    renametab "T: Kurz-Test"
+    $PWD/reset_status.sh
+    $PWD/short_test.sh | tee -a $LOGDIR/short_test_full.log
+  ;;
+  e|E)
+    renametab "E: Kurz-Test"
+    $PWD/reset_status.sh
+    $PWD/short_test.sh no_cpu | tee -a $LOGDIR/short_test_full.log
+  ;;
+  x|X)
+    renametab "X: Partitionstab. loeschen"
+    $PWD/remove_partitions.sh #!
+  ;;
+  y|Y)
+    renametab "Y: HDDs loeschen (schnell)"
+    $PWD/reset_status.sh
+    $PWD/erase_hdd.sh #!
+  ;;
+  s|S)
+    $PWD/reset_status.sh
+  ;;
+  c|C)
+    renametab "U: HDDWipe, Stresstest"
+    check_stresstest_defaults_wipe
+      $PWD/reset_status.sh
+
+      [ "$HDDWIPE_FORCED" = "force" ] || ask_hddwipe
+      create_raid_zero
+
+      if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+        send_robot_test_start $ROBOT_TEST_RESULT_URL
+      fi
+      $PWD/rebuild_check.sh
+
+      $PWD/wipe.sh "force"
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 1 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-first
+      $PWD/stressapptest.sh --duration $STRESSTEST_DURATION $STRESSTEST_MODE --ignore-error
+      $PWD/mce.sh
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 2 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-last
+      #$PWD/stresstest_compare_hdd_values.sh
+      $PWD/dmesg.sh
+      $PWD/stresstest_result.sh
+      $PWD/reset_bmc.sh
+
+      create_raid
+  ;;
+  a|A)
+    renametab "A: HDDWipe (SECURE ERASE BETA), Stresstest"
+    check_stresstest_defaults_wipe
+      $PWD/reset_status.sh
+
+      [ "$HDDWIPE_FORCED" = "force" ] || ask_hddwipe
+      create_raid_zero
+
+      if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+        send_robot_test_start $ROBOT_TEST_RESULT_URL
+      fi
+
+      $PWD/rebuild_check.sh
+      $PWD/wipe.sh "force"
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 1 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-first
+      $PWD/stressapptest.sh --duration $STRESSTEST_DURATION $STRESSTEST_MODE --ignore-error
+      $PWD/mce.sh
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 2 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-last
+      #$PWD/stresstest_compare_hdd_values.sh
+      $PWD/dmesg.sh
+      $PWD/stresstest_result.sh
+      $PWD/reset_bmc.sh
+
+      create_raid
+ ;;
+ v|V)
+    renametab "V: HDDWipe und Stresstest"
+    # stop test, if hddwipe is not allowed
+    if ! hddwipe_allowed ; then
+      echo_red "HDD wiping is not allowed - server seems not to be cancelled for at least 48 hours. ABORT."
+      sleep 3
+      exit 0
+    else
+      echo "===> HDDWIPE allowed <==="
+      check_stresstest_defaults_wipe
+      $PWD/reset_status.sh
+      if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+        send_robot_test_start $ROBOT_TEST_RESULT_URL
+      fi
+
+      [ "$HDDWIPE_FORCED" = "force" ] || ask_hddwipe
+      create_raid_zero
+
+      $PWD/rebuild_check.sh
+
+      $PWD/wipe.sh $HDDWIPE_FORCED
+
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 1 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-first
+      $PWD/stressapptest.sh --duration $STRESSTEST_DURATION $STRESSTEST_MODE --ignore-error
+      $PWD/mce.sh
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 2 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-last
+      #$PWD/stresstest_compare_hdd_values.sh
+      $PWD/dmesg.sh
+      $PWD/stresstest_result.sh
+
+      create_raid
+    fi
+  ;;
+  z|Z)
+    renametab "V: HDDWipe und STRESSTEST"
+    check_stresstest_defaults_wipe
+      $PWD/reset_status.sh
+      if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+        send_robot_test_start $ROBOT_TEST_RESULT_URL
+      fi
+
+      ask_hddwipe
+      create_raid_zero
+
+      $PWD/rebuild_check.sh
+
+      $PWD/wipe.sh
+
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 1 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-first
+      $PWD/stressapptest.sh --duration $STRESSTEST_DURATION $STRESSTEST_MODE --ignore-error
+      $PWD/mce.sh
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 2 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-last
+      #$PWD/stresstest_compare_hdd_values.sh
+      $PWD/dmesg.sh
+      $PWD/stresstest_result.sh
+
+      create_raid
+  ;;
+  w|W)
+    renametab "W: HDDs loeschen (sicher)"
+
+    [ "$HDDWIPE_FORCED" = "force" ] || ask_hddwipe
+    create_raid_zero
+
+    $PWD/reset_status.sh
+
+    $PWD/wipe.sh
+
+    create_raid
+
+    #$PWD/hddwipe.sh #!
+  ;;
+  g|G)
+    renametab "G: HDD Test"
+    $PWD/reset_status.sh
+    $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m short #!
+  ;;
+  m|M)
+    renametab "M: MCE-Check"
+    $PWD/reset_status.sh
+    $PWD/mce.sh
+  ;;
+  o|O)
+    renametab "O: Adaptec Update"
+    cd /opt/raid_ctrl_adaptec
+    arcconf romupdate 1 as5405
+    cd - > /dev/null
+  ;;
+  q|Q)
+    renametab "Q: LSI Update"
+    cd /opt/raid_ctrl/lsi
+    megacli -adpfwflash -f current.rom -a0
+    cd - > /dev/null
+  ;;
+  j|J)
+    renametab "J: Automatic Firmwareupdate RAID"
+    $PWD/update_controller.sh
+  ;;
+  k|K)
+    check_stresstest_defaults_kunde
+    renametab "K: Stresstest (!BETA!)"
+    $PWD/reset_status.sh
+    if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+      send_robot_test_start $ROBOT_TEST_RESULT_URL
+    fi
+    $PWD/rebuild_check.sh
+    $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m $HDDTEST_MODE -n 1 -r $HDDTEST_READ_MODE
+    $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-first
+    $PWD/stressapptest.sh --duration $STRESSTEST_DURATION $STRESSTEST_MODE
+    $PWD/mce.sh
+    $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m $HDDTEST_MODE -n 2 -r $HDDTEST_READ_MODE
+    $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-last
+    #$PWD/stresstest_compare_hdd_values.sh
+    $PWD/dmesg.sh
+    $PWD/stresstest_result.sh
+  ;;
+  u|U)
+    renametab "U: HDDWipe FORCED, Stresstest"
+    check_stresstest_defaults_wipe
+
+      [ "$HDDWIPE_FORCED" = "force" ] || ask_hddwipe
+      create_raid_zero
+
+      echo "===> HDDWIPE FORCED <==="
+      $PWD/reset_status.sh
+      if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+        send_robot_test_start $ROBOT_TEST_RESULT_URL
+      fi
+      $PWD/rebuild_check.sh
+      #$PWD/hddwipe_hwb.sh "$HDDWIPE_FORCED" "HWB"
+      if [ -z "$HDDWIPE_FORCED" ]; then
+        HDDWIPE_FORCED="-"
+      fi
+
+      $PWD/wipe.sh $HDDWIPE_FORCED
+
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m short -n 1 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-first
+      $PWD/stressapptest.sh --duration 120 $STRESSTEST_MODE --ignore-error
+      $PWD/mce.sh
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 2 -r $HDDTEST_READ_MODE --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-last
+      #$PWD/stresstest_compare_hdd_values.sh
+      $PWD/dmesg.sh
+      $PWD/stresstest_result.sh
+
+      create_raid
+  ;;
+  l|L)
+    renametab "L: Stresstest 24h"
+    $PWD/reset_status.sh
+    if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+      send_robot_test_start $ROBOT_TEST_RESULT_URL
+    fi
+    $PWD/rebuild_check.sh
+    $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 1 -r standard
+    $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-first
+    $PWD/stressapptest.sh --duration 1440
+    $PWD/mce.sh
+    $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 2 -r standard
+    $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-last
+    #$PWD/stresstest_compare_hdd_values.sh
+    $PWD/dmesg.sh
+    $PWD/stresstest_result.sh
+  ;;
+  f|F)
+    renametab "F: Wipe + HDDTest"
+    $PWD/reset_status.sh
+    echo "===> HDDWIPE FORCED <==="
+    if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+      send_robot_test_start $ROBOT_TEST_RESULT_URL
+    fi
+
+    create_raid_zero
+
+    $PWD/wipe.sh "force"
+    $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -r standard
+    $PWD/dmesg.sh
+
+    create_raid
+  ;;
+  n|N)
+    renametab "N: SSD Secure Erase"
+      if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+        send_robot_test_start $ROBOT_TEST_RESULT_URL
+      fi
+      create_raid_zero
+
+      $PWD/reset_status.sh
+      $PWD/wipe.sh "force"
+
+      echo "true" > $LOGDIR/ssd_special
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m short -n 1 -r standard --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-first
+      $PWD/stressapptest.sh --duration 120 $STRESSTEST_MODE --ignore-error
+      $PWD/mce.sh
+      $PWD/hddtest_${HDDTEST_TYPE}_v2.0.4.sh -m long -n 2 -r standard --ignore-error
+      $PWD/stresstest_catch_hddlog.sh stresstest-hddlog-last
+      #$PWD/stresstest_compare_hdd_values.sh
+      $PWD/dmesg.sh
+      $PWD/stresstest_result.sh
+
+      create_raid
+  ;;
+  *)
+    echo -e "\n\nERROR\n"
+    sleep 2
+    #exec $0
+  ;;
+esac
+}
+
+function return_to_menu {
+  SUMMARY_LOG="$(send2 get_summary)"
+
+  fancheck_result="$(echo "$SUMMARY_LOG" | sed -ne 's/FANCHECK:\ \(.*\)/\1/p' | tr '[:upper:]' '[:lower:]')"
+  echo "fancheck:$fancheck_result" >> $ROBOT_LOGFILE
+
+  SUMMARY="$(send2 summary)"
+
+  if [ "$(echo $SUMMARY | grep -i error)" ]; then
+    echo "hwc-summary:error" >> $ROBOT_LOGFILE
+  fi
+  if [ "$ROBOT_TEST_RESULT_URL" != "" ]; then
+    send_robot_test_result $ROBOT_TEST_RESULT_URL
+  fi
+
+  echo -en "\n\nPress 'w' to return to the menu ... "
+  ANYKEY=""
+  while [ "$ANYKEY" != "w" ]; do
+    read -n1 ANYKEY
+  done
+}
+
+function main {
+
+  # disbale HPA detection temporary for toshiba hdds
+  # tommy will try to find a solution with toshiba 25.09.2019
+  echo 1 > /sys/module/libata/parameters/ignore_hpa
+
+  #
+  # send reset to new.rz-admin
+  send2 reset
+
+  # prepare log-directory
+  #
+  mkdir -p $LOGDIR
+
+  # send information about this computer to the monitor server ...
+  #
+  clear
+  #
+  # send hwdata to new.rz-admin
+  echo_grey "\nsend hardware information to rz-admin ..."
+  $PWD/report.sh
+
+
+  # start sending periodic livesigns
+  #
+  ps c | grep periodic || $PWD/periodic_livesign.sh
+
+  # beep once
+  #
+  beep4
+
+  # default mode
+  #
+  MODE="$1"
+
+  # read the robot url where the test should be reported
+  ROBOT_TEST_RESULT_URL="$2"
+
+  DEFAULT=K
+
+  check_special_settings $2 $3 $4 $5 $6
+
+  check_hwcheck_mode $MODE
+
+  check_stresstest_mode
+
+  # display menu
+  #
+  clear
+  renametab "hwcheck"
+
+  display_menu
+
+  get_menu_answer
+
+  start_selected_check
+
+  beep
+
+  return_to_menu
+}

@@ -1,0 +1,212 @@
+# Get controller IDs
+storcli_controller_ids() {
+  local storcli_output="$(storcli show J)"
+  local jq_query='.Controllers[0]."Response Data"."System Overview"[].Ctl'
+  echo "$storcli_output" | jq "$jq_query" 2> /dev/null
+}
+
+# Get PD IDs for controller
+# $1 Controller ID
+storcli_pd_ids() {
+  local controller_id="$1"
+  local storcli_output="$(storcli "/c$controller_id" show J)"
+  local jq_query='.Controllers[0]."Response Data"."PD LIST"[]."EID:Slt"'
+  echo "$storcli_output" | jq "$jq_query" 2> /dev/null | tr -d '"'
+}
+
+# Get PD serial number
+# $1 Controller ID
+# $2 PD ID
+storcli_pd_serial_number() {
+  local controller_id="$1"
+  local pd_id="$2"
+  local storcli_output="$(storcli "/c$controller_id" "/e${pd_id%:*}" "/s${pd_id##*:}" show all J)"
+  local jq_query=".Controllers[0].\"Response Data\".\"Drive /c$controller_id/e${pd_id%:*}/s${pd_id##*:} - Detailed Information\".\"Drive /c$controller_id/e${pd_id%:*}/s${pd_id##*:} Device attributes\".SN"
+  echo "$storcli_output" | jq "$jq_query" 2> /dev/null | tr -d '"' | xargs
+}
+
+# Get PD medium
+# $1 Controller ID
+# $2 PD ID
+storcli_pd_medium() {
+  local controller_id="$1"
+  local pd_id="$2"
+  local storcli_output="$(storcli "/c$controller_id" "/e${pd_id%:*}" "/s${pd_id##*:}" show all J)"
+  local jq_query=".Controllers[0].\"Response Data\".\"Drive /c$controller_id/e${pd_id%:*}/s${pd_id##*:}\"[0].Med"
+  echo "$storcli_output" | jq "$jq_query" 2> /dev/null | tr -d '"'
+}
+
+# Get PD interface
+# $1 Controller ID
+# $2 PD ID
+storcli_pd_interface() {
+  local controller_id="$1"
+  local pd_id="$2"
+  local storcli_output="$(storcli "/c$controller_id" "/e${pd_id%:*}" "/s${pd_id##*:}" show all J)"
+  local jq_query=".Controllers[0].\"Response Data\".\"Drive /c$controller_id/e${pd_id%:*}/s${pd_id##*:}\"[0].Intf"
+  echo "$storcli_output" | jq "$jq_query" 2> /dev/null | tr -d '"'
+}
+
+# Get controller IDs
+perccli_controller_ids() {
+  local perccli_output="$(perccli show J)"
+  local jq_query='.Controllers[0]."Response Data"."System Overview"[].Ctl'
+  echo "$perccli_output" | jq "$jq_query" 2> /dev/null
+}
+
+# Get PD IDs for controller
+# $1 Controller ID
+perccli_pd_ids() {
+  local controller_id="$1"
+  local perccli_output="$(perccli "/c$controller_id" show J)"
+  local jq_query='.Controllers[0]."Response Data"."PD LIST"[]."EID:Slt"'
+  echo "$perccli_output" | jq "$jq_query" 2> /dev/null | tr -d '"'
+}
+
+# Get PD serial number
+# $1 Controller ID
+# $1 PD ID
+perccli_pd_serial_number() {
+  local controller_id="$1"
+  local pd_id="$2"
+  local perccli_output="$(perccli "/c$controller_id" "/e${pd_id%:*}" "/s${pd_id##*:}" show all J)"
+  local jq_query=".Controllers[0].\"Response Data\".\"Drive /c$controller_id/e${pd_id%:*}/s${pd_id##*:} - Detailed Information\".\"Drive /c$controller_id/e${pd_id%:*}/s${pd_id##*:} Device attributes\".SN"
+  echo "$perccli_output" | jq "$jq_query" 2> /dev/null | tr -d '"' | xargs
+}
+
+# Get PD medium
+# $1 Controller ID
+# $2 PD ID
+perccli_pd_medium() {
+  local controller_id="$1"
+  local pd_id="$2"
+  local perccli_output="$(perccli "/c$controller_id" "/e${pd_id%:*}" "/s${pd_id##*:}" show all J)"
+  local jq_query=".Controllers[0].\"Response Data\".\"Drive /c$controller_id/e${pd_id%:*}/s${pd_id##*:}\"[0].Med"
+  echo "$perccli_output" | jq "$jq_query" 2> /dev/null | tr -d '"'
+}
+
+# Get PD interface
+# $1 Controller ID
+# $2 PD ID
+perccli_pd_interface() {
+  local controller_id="$1"
+  local pd_id="$2"
+  local perccli_output="$(perccli "/c$controller_id" "/e${pd_id%:*}" "/s${pd_id##*:}" show all J)"
+  local jq_query=".Controllers[0].\"Response Data\".\"Drive /c$controller_id/e${pd_id%:*}/s${pd_id##*:}\"[0].Intf"
+  echo "$perccli_output" | jq "$jq_query" 2> /dev/null | tr -d '"'
+}
+
+# Get blkdev type
+# $1 Blkdev name
+# $2 Serial number
+blkdev_type() {
+  local blkdev_name="${1##*/}"
+  local serial_number="$2"
+  [[ -e "/sys/class/block/$blkdev_name/queue/rotational" ]] || return 1
+  case "$(cat "/sys/class/block/$blkdev_name/queue/rotational")" in
+    0)
+      if [[ -d "/sys/class/block/$blkdev_name/device/device/nvme" ]]; then
+        echo nvme
+        return
+      fi
+      echo ssd
+    ;;
+    1)
+      for controller_id in $(storcli_controller_ids); do
+        for pd_id in $(storcli_pd_ids "$controller_id"); do
+          if [[ "$(storcli_pd_serial_number "$controller_id" "$pd_id")" == "$serial_number" ]]; then
+            if [[ "$(storcli_pd_medium "$controller_id" "$pd_id")" == 'SSD' ]]; then
+              echo ssd
+              return
+            fi
+            if [[ "$(storcli_pd_interface "$controller_id" "$pd_id")" == 'SAS' ]]; then
+              echo sas_hard_disk
+              return
+            fi
+          fi
+        done
+      done
+      for controller_id in $(perccli_controller_ids); do
+        for pd_id in $(perccli_pd_ids "$controller_id"); do
+          if [[ "$(perccli_pd_serial_number "$controller_id" "$pd_id")" == "$serial_number" ]]; then
+            if [[ "$(perccli_pd_medium "$controller_id" "$pd_id")" == 'SSD' ]]; then
+              echo ssd
+              return
+            fi
+            if [[ "$(perccli_pd_interface "$controller_id" "$pd_id")" == 'SAS' ]]; then
+              echo sas_hard_disk
+              return
+            fi
+          fi
+        done
+      done
+      echo hard_disk
+    ;;
+    *)
+      return 1
+    ;;
+  esac
+}
+
+# Get new-rzadmin hardware type
+# $1 Serial number
+new_rzadmin_hardware_type() {
+  local serial_number="$1"
+  for dir in /sys/class/net/*; do
+    file="$dir/address"
+    [[ -e "$file" ]] || continue
+    [[ "$(cat "$file")" == "$serial_number" ]] || continue
+    echo network_card
+    return
+  done
+  if [[ "$(dmidecode -t system)" =~ UUID:\ ([^$'\n']*) ]] && [[ "${BASH_REMATCH[1]}" == "$serial_number" ]]; then
+    echo motherboard
+    return
+  fi
+  while read line; do
+    [[ "$line" =~ Serial\ Number:\ ([^$'\n']*) ]] || continue
+    [[ "${BASH_REMATCH[1]}" == "$serial_number" ]] || continue
+    echo ram_module
+    return
+  done < <(dmidecode -t memory)
+  while read line; do
+    [[ "$line" =~ ^([^:]*):(.*)$ ]] || continue
+    [[ "${BASH_REMATCH[2]}" == "$serial_number" ]] || continue
+    blkdev_type "${BASH_REMATCH[1]}" "$serial_number" && return
+  done < <(get_all_hdd_serials)
+  return 1
+}
+
+# Send fan speed measurements
+# $1 Hardware test ID
+send_fan_speed_measurements() {
+  local hardware_test_id="$1"
+  {
+    for file in /sys/class/hwmon/hwmon*/fan[0-9]*_input; do
+      [[ -e "$file" ]] || continue
+      hwmon_name="${file%/*}"
+      if [[ "$(cat "$hwmon_name/name")" == 'ftsteutates' ]]; then
+        multiplier=60
+      else
+        multiplier=1
+      fi
+      fan_connector_name="${file##*/}"
+      if [[ -e "${file%/*}/${fan_connector_name%_input}_label" ]]; then
+        fan_connector_name="$(cat "${file%/*}/${fan_connector_name%_input}_label")"
+      fi
+      for ((i=1;i<=5;i++)); do
+        value="$(cat "$file")"
+        jq --arg value "$((value * multiplier))" --arg fan_connector_name "${hwmon_name##*/}_${fan_connector_name%_input}" -n '{fan_connector_name: $fan_connector_name, value: $value|tonumber}'
+        sleep 1
+      done
+    done
+    for ((i=1;i<=5;i++)); do
+      while read name separator reading separator unit separator; do
+        [[ -z "$reading" ]] && continue
+        [[ "$unit" != 'RPM' ]] && continue
+        jq --arg value "$reading" --arg fan_connector_name "ipmitool_sensor_list_$name" -n '{fan_connector_name: $fan_connector_name, value: $value|tonumber}'
+        sleep 1
+      done < <(ipmitool sensor list)
+    done
+  } | jq -s . | send2 test_log_raw "$hardware_test_id" __fan_speed_measurements -
+}

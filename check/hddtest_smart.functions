@@ -1,0 +1,861 @@
+#!/bin/bash
+
+#
+# include all functions for hddtest_smart
+#
+# patrick.tausch@hetzner.de 2013.11.28
+#
+
+. $PWD/report.function
+
+function main() {
+trap "abort_main ; kill -9 $$" 1 2 9 15
+
+#MODE=$1
+
+#STRESSTEST_NUMBER="$2"
+
+ARGS=`getopt -o m:n:r: --long ignore-error -- "$@"`
+
+#Bad arguments
+if [ $? -ne 0 ]; then
+    exit 1
+fi
+
+# A little magic
+eval set -- "$ARGS"
+
+while true; do
+  case "$1" in
+    -m) if [ "$2" = "short" ]; then
+         MODE="short"
+         shift 2
+       elif [ "$2" = "long" ]; then
+         MODE="long"
+         shift 2
+       else
+         exit 1
+       fi
+       ;;
+    -n) if [[ "$2" =~ ^[1-9][0-9]*$ ]]; then
+         STRESSTEST_NUMBER="$2"
+         shift 2
+       else
+         exit 1
+       fi
+       ;;
+    -r) if [ "$2" = "standard" ]; then
+         READTEST="standard"
+         shift 2
+       elif [ "$2" = "full" ]; then
+         READTEST="full"
+         shift 2
+       fi
+       ;;
+    "--ignore-error")
+       IGNORE_ERROR=true
+       shift
+       ;;
+    --) shift ; break ;;
+    *) echo "Internal error!" ; exit 1 ;;
+  esac
+done
+
+if [ -z "$MODE" ]; then
+  abort_main
+  exit 1
+fi
+
+if [ -z "$READTEST" ]; then
+  READTEST="standard"
+fi
+
+echo -e "Mode: $MODE\nStressnummer: $STRESSTEST_NUMBER\nRead: $READTEST"
+
+#
+# if another test is failed set $FAILED_TEST
+if ( [ -z $IGNORE_ERROR ] && [ -f $LOGDIR/test_error.log ] && [ -n "$(cat $LOGDIR/test_error.log)" ] ) && ( [ "$STRESSTEST_NUMBER" = "1" ] || [ "$(cat $LOGDIR/test_error.log | grep -E 'HDDTEST1|degraded')" ] ); then
+  echo "another test is failed exit"
+  FAILED_TEST="true"
+fi
+
+rm $LOGDIR/hddtest*
+
+
+echo_yellow "\n=====  HARDDISK TEST (SMART)  =====\n"
+
+
+# prepare screenrc
+#
+screenrc="/tmp/screenrc-$(basename $0)-$$"
+if [ -z "$FAILED_TEST" ]; then
+  cat <<EOF >$screenrc
+  ## zombie on
+  caption always "%{WB}%?%-Lw%?%{kw}%n*%f %t%?(%u)%?%{WB}%?%+Lw%?%{Wb}"
+  hardstatus alwayslastline "%{= RY}%H %{BW} %l %{bW} %c %M %d%="
+
+EOF
+fi
+
+#
+# get all disks and type
+
+if ( [ "$STRESSTEST_NUMBER" = '' ] || [ "$STRESSTEST_NUMBER" = "1" ] ); then
+
+  DISKS="$(get_all_hdd_types)"
+  echo "$DISKS" > $LOGDIR/disks_hddtest.tmp
+
+else
+  DISKS="$(cat $LOGDIR/disks_hddtest.tmp)"
+fi
+
+
+#
+# get lsi details if lsi controller
+
+[ "$(echo $DISKS | grep lsi)" ] && LSI_DEVICE="$(get_lsi_hdd_device)"
+
+#
+# get each disk details and prepare the smart check
+
+for DISK in $DISKS; do
+  #
+  # get disk type
+  TYPE=$(echo $DISK | cut -d: -f1)
+
+  #
+  # get device
+  DEVICE=$(echo $DISK | cut -d: -f2)
+
+  #
+  # get serial
+  SERIAL=$(echo $DISK | cut -d: -f3)
+
+  echo "$TYPE $DEVICE $SERIAL"
+  #
+  # send status
+  STARTTIME="$(date +%H:%Mh)"
+
+  #
+  # if another test is failed exit
+  if [ "$FAILED_TEST" ]; then
+    echo "another test is failed exit"
+    send2 info "$SERIAL" "HDD"
+    HDDTEST_ID="$(send2 test "$SERIAL" "HDDTEST${STRESSTEST_TESTNUMBER}" "working" "preparing")"
+    send2 test_log_json "$HDDTEST_ID" "{\"TEST_ABORTED\":\"RAID_DEGRADED\"}" > /dev/null
+    send hddsmart-result "ABORT" "Aborted! another test was failed" "$SERIAL" "$STRESSTEST_NUMBER"
+    send2 update_status "$HDDTEST_ID" "ABORTED"
+    continue
+  fi
+
+  #
+  # start test for ata disk
+  if [ "$TYPE" == "ata" ]; then
+    #
+    # check for LSI SAS
+    if [ "$(echo $DISK | cut -d: -f4)" == "JBOD" ]; then
+      echo "screen -t /dev/$DEVICE bash -c 'bash $PWD/hddtest_smart_worker_sas_v2.0.0.sh /dev/$DEVICE \"$(echo $SERIAL)\" \"$MODE\" \"\" \"\" $READTEST $STRESSTEST_NUMBER; sleep 2'" >> $screenrc
+    else
+      echo "screen -t /dev/$DEVICE bash -c 'bash $PWD/hddtest_smart_worker_v2.0.3.sh /dev/$DEVICE \"$(echo $SERIAL)\" \"$MODE\" \" \" $READTEST $STRESSTEST_NUMBER; sleep 2'" >> $screenrc
+    fi
+  fi
+
+  #
+  # start test for disk at 3ware RAID
+  if [ "$TYPE" == "3ware" ]; then
+    EXTENSION="-d 3ware,"
+    device_count_3ware=$(echo $DISK | cut -d: -f4 | sed 's/p//g')
+
+    extend_devs=$(ls /dev/tw[a-e]*)
+    for extend_dev in $extend_devs; do
+      SMART_SERIAL=$(smartctl $EXTENSION$device_count_3ware -i $extend_dev | grep ^Serial | cut -d: -f2 | sed -e '/.*0000.*/ s/\(.*\)0000.*/\1/g;s/.*\(MN1020\|MN1120\|MN3220\|MN1270\|MN1240\|MN1220\|MN1221\|MN5220\|PL2331\|PL1331\|PN1131\|PN1133\|PN1138\|PN1186\|PN1338\|PN1331\|PN2331\|PN1134\|PN1181\|PN2134\|PN2138\|PN2161\|PN2186\|PN2338\|PN2361\|PN1334\|PN2334\|JP2940\|JP9960\|WD-\)//g')
+
+      #
+      # check serials
+      if [ -n "$SERIAL" ] && [ -n "$SMART_SERIAL" ] && [ $SERIAL == $SMART_SERIAL ]; then
+        echo "screen -t $extend_dev  bash -c 'bash $PWD/hddtest_smart_worker_v2.0.3.sh $extend_dev \"$(echo $SERIAL)\" \"$MODE\" \"${EXTENSION}$device_count_3ware\" $READTEST $STRESSTEST_NUMBER ; sleep 2'" >> $screenrc
+      fi
+    done
+  fi
+
+  #
+  # start test for disk at Adaptec RAID
+  if [ "$TYPE" == "adaptec" ]; then
+    #
+    # load sg module 
+    modprobe sg >> /dev/null
+
+    #
+    # check if there is a JBOD
+
+    JBOD=$(echo $DISK | cut -d: -f4)
+
+    if [ "$JBOD" ]; then
+      smartctl -d sat -i /dev/$DEVICE > /dev/null
+      if [ "$?" -ne 0 ]; then 
+        echo "screen -t /dev/$DEVICE bash -c 'bash $PWD/hddtest_smart_worker_sas_v2.0.0.sh /dev/$DEVICE \"$(echo $SERIAL)\" \"$MODE\" \"-d scsi\" \"\" $READTEST $STRESSTEST_NUMBER; sleep 2'" >> $screenrc
+      else
+        echo "screen -t /dev/$DEVICE bash -c 'bash $PWD/hddtest_smart_worker_v2.0.3.sh /dev/$DEVICE \"$(echo $SERIAL)\" \"$MODE\" \"-d sat\" $READTEST $STRESSTEST_NUMBER; sleep 2'" >> $screenrc
+      fi
+    else
+      #
+      # clear var for serial check - to find serial who no more available
+      serial_check=false
+
+      #
+      # check sg devices, serials and start the test
+      for i in $(ls /dev/sg[0-9]*); do
+        #
+        # get serial from smartctl
+        # used scsi extention because they work in some cases
+        #awk 'BEGIN {FS="0000N"} {print $1}'
+        SMART_SERIAL="$(smartctl -d scsi -i $i | grep Serial | cut -d":" -f2 | sed -e '/.*0000.*/ s/\(.*\)0000.*/\1/g;s/.*\(MN1020\|MN1120\|MN3220\|MN1270\|MN1240\|MN1220\|MN1221\|MN5220\|PL2331\|PL1331\|PN1131\|PN1133\|PN1138\|PN1186\|PN1338\|PN2331\|PN1331\|PN1134\|PN1181\|PN2134\|PN2138\|PN2161\|PN2186\|PN2338\|PN2361\|PN1334\|PN2334\|JP2940\|JP9960\|WD-\)//g')"
+
+        #
+        # check serials
+        if [ -n "$SERIAL" ] && [ -n "$SMART_SERIAL" ] && [ $SERIAL == $SMART_SERIAL ]; then
+          #
+          # set var if disk is available
+          serial_check=true
+
+          #
+          # check sas or sat disk
+          if [ "$(smartctl -d sat -i $i | grep "Identity failed")" ]; then
+            #
+            # sas disk - start test
+            echo "DEBUG SAS"
+            echo "DEBUG: $DEVICE"
+            echo "screen -t $i  bash -c 'bash $PWD/hddtest_smart_worker_sas_v2.0.0.sh $i \"$(echo $SERIAL)\" \"$MODE\" \"-d scsi\" \"/dev/$DEVICE\" $READTEST $STRESSTEST_NUMBER; sleep 2'" >> $screenrc
+          else
+            # sat disk - start test
+            echo "DEBUG SAT"
+            echo "screen -t $i  bash -c 'bash $PWD/hddtest_smart_worker_v2.0.3.sh $i \"$(echo $SERIAL)\" \"$MODE\" \"-d sat\" $READTEST $STRESSTEST_NUMBER; sleep 2'" >> $screenrc
+          fi 
+        fi
+      done
+      #
+      # serial_check - find disks whoe no more available and report error
+      if [ "$serial_check" = "false" ]; then
+        echo "HDDTEST$STRESSTEST_NUMBER: FAILED" >> $LOGDIR/test_error.log
+        send hddsmart-result "ERROR" "DISK NOT AVAILABLE" "$SERIAL" "$STRESSTEST_NUMBER"
+	echo "hdd_smart_test:error:hdd:$SERIAL not available" >> $ROBOT_LOGFILE
+        FAILED_TEST="true"
+      fi
+    fi
+  fi
+
+  #
+  # start test for disk at LSI RAID
+  if [ "$TYPE" == "lsi" ]; then
+    LSI_RAID_DEVICE="$(echo $DISK | cut -d: -f4)"
+    DEVICE_TYPE="$(echo $DISK | cut -d: -f5)"
+    if [ "$DEVICE_TYPE" = "SATA" ]; then
+      echo "LSI SATA"
+      echo "screen -t /dev/$DEVICE  bash -c 'bash $PWD/hddtest_smart_worker_v2.0.3.sh /dev/$DEVICE \"$(echo $SERIAL)\" \"$MODE\" \"-d megaraid,$LSI_RAID_DEVICE\" $READTEST $STRESSTEST_NUMBER; sleep 2'" >> $screenrc
+    fi
+    if [ "$DEVICE_TYPE" = "SAS" ]; then
+      echo "LSI SAS"
+      echo "screen -t /dev/$DEVICE  bash -c 'bash $PWD/hddtest_smart_worker_sas_v2.0.0.sh /dev/$DEVICE \"$(echo $SERIAL)\" \"$MODE\" \"-d megaraid,$LSI_RAID_DEVICE\" \"\" $READTEST $STRESSTEST_NUMBER; sleep 2'" >> $screenrc
+    fi
+  fi
+
+
+  #
+  # start test for disk at NVMe
+  if [ "$TYPE" == "nvme" ]; then
+    echo "screen -t /dev/$DEVICE  bash -c 'bash $PWD/hddtest_smart_worker_nvme.sh /dev/$DEVICE \"$(echo $SERIAL)\" \"$MODE\" \"\" $READTEST $STRESSTEST_NUMBER; sleep 2'" >> $screenrc
+  fi
+
+done
+sleep 10
+
+STARTTIME="$(date +%d.%m.\ %H:%M)"
+echo_grey "START: $STARTTIME"
+
+sleep 1
+
+# start hddtest in a screen session: start screen and stay attached
+#
+sleep 1
+if [ -n "$DISK" -a -z "$FAILED_TEST" ]; then
+  screen -mS $(basename $0) -c $screenrc
+fi
+
+# end
+ENDTIME="$(date +%H:%Mh)"
+echo_grey "END: $ENDTIME"
+
+#
+# display test result FAIL/OK
+
+for DISK in $DISKS; do
+  #
+  # get disk type
+  TYPE=$(echo $DISK | cut -d: -f1)
+
+  #
+  # get device
+  DEVICE=$(echo $DISK | cut -d: -f2)
+
+  #
+  # get serial
+  SERIAL=$(echo $DISK | cut -d: -f3)
+
+  DETAIL=''
+  STATUS="$(grep -h "$SERIAL" /root/hwcheck-logs/hddtest-result*)"
+  HDD_LOG=$(cat /root/hwcheck-logs/hddtest-$SERIAL.log | tr -s " ")
+  [ -n "$(echo "$HDD_LOG" | egrep '([0-9]{3,} ){3,}' | awk '{print $2" "$9" "$10}')" ] && DETAIL="$DETAIL$(echo "$HDD_LOG" | egrep '([0-9]{3,} ){3,}' | awk '{print $2" "$9" "$10" "}' )"
+  [ -n "$(echo "$HDD_LOG" | egrep '^SELFTEST-ERROR')" ] && DETAIL="${DETAIL}SELFTEST-ERROR"
+  [ -n "$(echo "$HDD_LOG" | egrep '^Error')" ] && DETAIL="$DETAIL$(echo "$HDD_LOG" | egrep 'Error' | sed 's/Error://g') "
+  [ -n "$(echo "$HDD_LOG" | egrep 'FAILED' | grep 'DMESG')" ] && DETAIL="${DETAIL}DMESG ERROR "
+
+  [ "$(echo $STATUS | grep ok)" ] && echo_green "$STATUS $DETAIL"
+  [ "$(echo $STATUS | grep error)" ] && echo_red "$STATUS $DETAIL"
+  ERROR_LOG="$ERROR_LOG\n$STATUS"
+  echo ""
+done
+
+#
+# safe all errors into extra file
+#
+if [ "$(echo -e "$ERROR_LOG" | grep FAIL)" -a -z "$FAILED_TEST" ]; then
+  echo -e "HDDTEST$STRESSTEST_NUMBER: FAILED\n\n$ERROR_LOG" > $LOGDIR/test_error.log
+fi
+
+#rm $LOGDIR/hddtest*
+}
+
+# send abort status, if signal catched
+# 
+abort_main() {
+  echo_red '\n\nABORTING ...\n' 1>&2
+  for hdd in $(get_disks | cut -d: -f1 | cut -d/ -f3) ; do
+    serials=$(get_all_hdd_serials | grep $hdd | cut -d: -f2)
+    for serial in $serials ; do
+      send2 info "$serial" "HDD"
+      HDDTEST_ID="$(send2 test "$serial" "HDDTEST${STRESSTEST_TESTNUMBER}" "working" "preparing")"
+      send hddsmart-result "ABORT" "Aborted! [$STARTTIME - $(date +%Y.%m.%d\ %H:%M:%S)]" "$serial" "$STRESSTEST_NUMBER"
+      send2 update_status "$HDDTEST_ID" "ABORTED"
+    done
+  done
+}
+
+
+######### worker.functions #########
+
+# send abort status, if signal catched
+#  
+#
+abort() {
+  echo_red '\n\nABORTING ...\n' 1>&2
+  send hddsmart-result "ABORT" "Aborted! [$STARTTIME - $(date +%d.%m.\ %H:%M)]" "$serials" "$STRESSTEST_TESTNUMBER"
+  send2 update_status "$HDDTEST_ID" "ABORTED"
+  sleep 1
+  }
+
+#
+# check rz-admin test result
+check_result() {
+  if [ "$(echo "$*" | grep -i error)" ]; then
+    return 1
+  else
+    return 0
+  fi
+}
+
+#
+# get health status from hdd
+check_hdd_health() {
+  # send status
+  send hddsmart-result "WORKING" "Start (Health-Check, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+  echo -n "Health Check:" >> $LOGDIR/hddtest-$serials.log
+  echo "Start: Health Check" 
+
+  #
+  # send helathcheck to new.rz-admin
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "HEALTH-Check" "working" "starting")"
+
+  # turn SMART ON
+  smartctl $EXTENSION -s on $disk > /dev/null
+
+  SMART_HEALTH_LOG="$(smartctl $EXTENSION -H $disk | sed -e 's/^\ *//g')"
+
+  #
+  # send healthlog
+  local LOGFILE="hddtest_smart.health.$serials.log"
+  echo "$SMART_HEALTH_LOG" > $LOGDIR/$LOGFILE
+
+  local RESULT
+  send2 test_log_raw "$SUBTEST_ID" "health_log" "$LOGDIR/$LOGFILE" > /dev/null
+  RESULT="$(send2 finished "$SUBTEST_ID")"
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+  check_result $RESULT
+  if (($? > 0)); then
+    FAILED=1
+    ERROR_MSG=$(echo -e "      FAILED\nSMART VALUES:      ABORTED\nSELFTEST:          ABORTED\nRead Test:         ABORTED\nDMESG Check:       ABORTED\n\n\n########## TEST DETAIL ##########\n$SMART_HEALTH_ERROR\n")
+    ERROR_CHECK="HEALTH-Check"
+  else
+    echo "      OK" >> $LOGDIR/hddtest-$serials.log
+  fi
+}
+
+
+#
+# check smart all values 
+check_smart_values() {
+  # send status
+  send hddsmart-result "WORKING" "Start (Values-Check, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+  echo -n "SMART VALUES:" >> $LOGDIR/hddtest-$serials.log
+  echo "Start: Values Check" 
+
+  #
+  # send helathcheck to new.rz-admin
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "VALUES-Check" "working" "starting")"
+  local LOGFILE="hddtest_smart.values.$serials.log"
+  smartctl $EXTENSION -A $disk > $LOGDIR/$LOGFILE
+  send2 test_log_raw "$SUBTEST_ID" "smart_values_log" "$LOGDIR/$LOGFILE" > /dev/null
+  local RESULT_VALUES="$(send2 finished "$SUBTEST_ID")"
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "TEMP-Check" "working" "starting")"
+  local LOGFILE="hddtest_smart.temperature.$serials.log"
+  smartctl $EXTENSION -l scttemp $disk > $LOGDIR/$LOGFILE
+  send2 test_log_raw "$SUBTEST_ID" "smart_temp_log" "$LOGDIR/$LOGFILE" > /dev/null
+  local RESULT_TEMP="$(send2 finished "$SUBTEST_ID")"
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "LBA-Check" "working" "starting")"
+  local LOGFILE="hddtest_smart.lba.$serials.log"
+  smartctl $EXTENSION -l error $disk > $LOGDIR/$LOGFILE
+  send2 test_log_raw "$SUBTEST_ID" "smart_lba_log" "$LOGDIR/$LOGFILE" > /dev/null
+  local RESULT_LBA="$(send2 finished "$SUBTEST_ID")"
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+  check_result $RESULT_VALUES $RESULT_TEMP $RESULT_LBA
+  if (($? > 0 )); then
+    FAILED=1
+    ERROR_MSG=$(echo -e "      FAILED\nSELFTEST:          ABORTED\nRead Test:         ABORTED\nDMESG Check:       ABORTED\n\n\n########## TEST DETAIL ##########\n$SMART_FAILING_NOW\n")
+    ERROR_CHECK="Values-Check"
+  fi
+}
+
+
+#
+# start read test
+start_read_test() {
+  # send status
+  send hddsmart-result "WORKING" "Start (Read-Check, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "READ-Check" "working" "starting")"
+  echo "Start: Read Test"
+  echo -n "Read Test:" >> $LOGDIR/hddtest-$serials.log
+  if [ "$1" = "standard" ]; then
+    if [ -n "$(echo "$disk" | grep sd)" ]; then
+      DD_OUTPUT="$(dd if=$disk bs=1M count=102400 | pv -brtpe -s100G -i1 -N"Read 100GiB" | dd of=/dev/null 2>&1)"
+    fi
+  elif [ "$1" = "full" ]; then
+    if [ -n "$(echo "$disk" | grep sd)" ]; then
+      DD_OUTPUT="$(dd if=$disk | pv -brtpe -i1 | dd of=/dev/null 2>&1)"
+    fi
+  fi
+
+  local LOGFILE="hddtest_smart.read.$serials.log"
+  if [ "$(echo "$DD_OUTPUT" | wc -l)" -gt 1 ]; then
+    echo "$DD_OUTPUT" > $LOGDIR/$LOGFILE
+  else
+    echo "ok" > $LOGDIR/$LOGFILE
+  fi
+  local RESULT
+  send2 test_log_raw "$SUBTEST_ID" "read_log" "$LOGDIR/$LOGFILE" > /dev/null
+  RESULT="$(send2 finished "$SUBTEST_ID")"
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+  # check dd output
+  check_result $RESULT
+  if (($? > 0 )); then
+    echo "         ERROR" >> $LOGDIR/hddtest-$serials.log
+  else
+    echo "         OK" >> $LOGDIR/hddtest-$serials.log
+  fi
+}
+
+
+#
+# check dmesg
+check_dmesg() {
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "DMESG-Check" "working" "starting")"
+  echo -n "DMESG Check:" >> $LOGDIR/hddtest-$serials.log
+  DEVICE="$(echo $disk | cut -d/ -f3)"
+  local ATA_DEVICE="$(readlink /sys/block/$DEVICE | sed 's/\/host[0-9].*//g; s/^\.\.\/.*\///g;')"
+  if [ -z "$ATA_DEVICE" ] || [[ $ATA_DEVICE != ata* ]]; then
+    ATA_DEVICE="not_detectable_ata_port"
+  fi
+  DMESG="$(dmesg | awk "((/$ATA_DEVICE/||/$DEVICE/)&&(/[Ee]rror/||/[Ff]ailed/))&&(!(/softreset/||/NCQ/||/handler/))" | tail -n 200)"
+
+  local LOGFILE="hddtest_smart.dmesg.$serials.log"
+  dmesg | awk "((/$ATA_DEVICE/||/$DEVICE/)&&(/[Ee]rror/||/[Ff]ailed/))&&(!(/softreset/||/NCQ/||/handler/))" > $LOGDIR/$LOGFILE
+  if [ "$(cat $LOGDIR/$LOGFILE | wc -l)" -gt "0" ]; then
+    DMESG=$(cat $LOGDIR/$LOGFILE | tail -n 1000)
+    echo "$DMESG" > $LOGDIR/$LOGFILE
+  else
+    echo "ok" > $LOGDIR/$LOGFILE
+  fi
+  local RESULT
+  send2 test_log_raw "$SUBTEST_ID" "dmesg_log" "$LOGDIR/$LOGFILE" > /dev/null
+  RESULT="$(send2 finished "$SUBTEST_ID")"
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+  check_result $RESULT
+  if (($? > 0 )); then
+    FAILED=1
+    ERROR_MSG=$(echo -e "       FAILED\n\n\n########## TEST DETAIL ##########\n$DMESG\n")
+    ERROR_CHECK="DMESG-Check"
+  else
+    echo "       OK" >> $LOGDIR/hddtest-$serials.log
+  fi
+}
+
+
+#
+# start selftest
+start_selftest() {
+
+  #
+  # abort all running tests
+  smartctl $EXTENSION -X $disk
+
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "SELFTEST-Check" "working" "starting")"
+  local LOGFILE="hddtest_smart.selftest.before.$serials.log"
+  smartctl $EXTENSION -l selftest $disk > $LOGDIR/$LOGFILE
+  send2 test_log_raw "$SUBTEST_ID" "before_log" "$LOGDIR/$LOGFILE"
+
+  #
+  # start selftest
+  echo -n "SELFTEST:" >> $LOGDIR/hddtest-$serials.log
+  starttest=$(smartctl $EXTENSION -t $MODE $disk) 
+
+  send hddsmart-result "WORKING" "Start (Selftest, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+  TIMING="$(echo $starttest | egrep -o "Please wait (.*) minutes for test to complete." | cut -d" " -f3)"
+  echo "duration time: $TIMING minutes"
+  if [ -n "$TIMING" ]; then
+    SECONDS="$[$TIMING*60]"
+  else
+    SECONDS="600"
+  fi
+
+  stat="250"
+  while [ "$stat" -gt "0" ]; do
+    stat="$(smartctl $EXTENSION -c $disk | grep "^Self-test" | awk -F'(' '{print $2}' | awk '{print $1}' | awk -F')' '{print $1}')"
+    if [ "$stat" -gt "0" ]; then
+      if [ "$SECONDS" -lt "600" ]; then
+        counter=$SECONDS
+      else
+        counter="600"
+      fi
+      while [ "$counter" -gt "0" ]; do
+        echo -n "."
+        sleep 1
+        counter="$[$counter-1]"
+      done
+    fi
+    # read actually procent
+    stat="$(smartctl $EXTENSION -c $disk | grep "^Self-test" | awk -F'(' '{print $2}' | awk '{print $1}' | awk -F')' '{print $1}')"
+    # check if failed
+    failed=$(smartctl $EXTENSION -c $disk | grep -E "failed|self-test routine was aborted")
+    if [ -n "$failed" ]; then
+      echo "Self-test failed/aborted..."
+      stat=0
+    fi
+    prozent="$(echo $stat | sed 's/^.//' | sed 's/^.//')"
+    if [ -n "$prozent" ]; then
+      prozent="$[$prozent*10]"
+    else
+      prozent="0"
+    fi
+    echo " "
+    echo "$prozent% remaining"
+  done
+
+  ENDTIME="$(date +%H:%Mh)"
+
+  local LOGFILE="hddtest_smart.selftest.after.$serials.log"
+  smartctl $EXTENSION -l selftest $disk > $LOGDIR/$LOGFILE
+  send2 test_log_raw "$SUBTEST_ID" "after_log" "$LOGDIR/$LOGFILE" > /dev/null
+  local RESULT="$(send2 finished "$SUBTEST_ID")"
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+  # check test result
+  #
+  check_result $RESULT
+  if (($? > 0 )); then
+    FAILED=1
+    ERROR_MSG=$(echo -e "          FAILED\nRead Test:         ABORTED\nDMESG Check:       ABORTED\n\n\n##################### TEST DETAIL #####################\n$(echo "$selftest_result" | awk /Num/,/END/)\n")
+    ERROR_CHECK="Selftest"
+  else
+    echo "Completed without errors"
+    echo "          OK" >> $LOGDIR/hddtest-$serials.log 
+  fi
+}
+
+
+write_result_log() {
+  
+  if [ -n "$ERROR_MSG" ]; then
+    echo "$ERROR_MSG" >> $LOGDIR/hddtest-$serials.log
+  fi
+
+  if [ -n "$ERROR_MSG_TEMP" ]; then
+    echo "$ERROR_MSG_TEMP" >> $LOGDIR/hddtest-$serials.log
+  fi
+
+  echo -e "\n\n\n##################### STORED DISK VALUES ######################\n" >> $LOGDIR/hddtest-$serials.log
+  echo -e "Power On Hours $power_on_hours\n" >> $LOGDIR/hddtest-$serials.log
+  
+  if [ -n "$SMART_VALUES" ]; then
+    echo "$SMART_VALUES" >> $LOGDIR/hddtest-$serials.log 
+  fi
+
+  REPORT_ERROR=''
+  if [ -n "$FAILED_TEMP" ]; then
+    REPORT_ERROR=2
+  fi
+  if [ -n "$FAILED" ]; then
+    REPORT_ERROR=1
+  fi
+
+  if [ -z "$REPORT_ERROR" ]; then
+    echo -e "\n\nDisk: $serials OK" >> $LOGDIR/hddtest-$serials.log
+  else
+    if [ "$REPORT_ERROR" == "2" ]; then
+      echo -e "\n\nDisk: $serials TEMP" >> $LOGDIR/hddtest-$serials.log
+    else
+      echo -e "\n\nDisk: $serials FAIL" >> $LOGDIR/hddtest-$serials.log
+    fi
+  fi
+
+  if [ -z "$REPORT_ERROR" ]; then
+    send hddsmart-result "OK" "Finished (Mode: $MODE, Device: $disk_wo_dev); [$STARTTIME - $ENDTIME]" "$serials" "$STRESSTEST_TESTNUMBER"
+  else
+    if [ "$REPORT_ERROR" == "2" ]; then
+        send hddsmart-result "WARNING" "Finished (Values-Check-Temp, Device: $disk_wo_dev); [$STARTTIME - $ENDTIME]" "$serials" "$STRESSTEST_TESTNUMBER"
+        echo "hdd_smart_test:warning:hdd:temperature to high at $disk_wo_dev" >> $ROBOT_LOGFILE
+    else
+      echo "hdd_smart_test:error:hdd:$ERROR_CHECK at $disk_wo_dev" >> $ROBOT_LOGFILE
+      send hddsmart-result "ERROR" "Finished ($ERROR_CHECK, Device: $disk_wo_dev); [$STARTTIME - $ENDTIME]" "$serials" "$STRESSTEST_TESTNUMBER"
+    fi
+  fi
+  # RonGar
+  #mv $LOGDIR/hddtest-$serials.log $LOGDIR/stresstest-hdd-log-$serials.log
+}
+
+
+function main_worker() {
+
+#
+# load report function 2
+. $PWD/report.function
+
+
+# get some important data about the disk
+#
+if [ "$1" -a "$2" ] ; then
+  disk=$1
+  disk_wo_dev=$(echo $disk | cut -d/ -f3)
+  serials=$2
+else
+  echo "Usage:  $0  </dev/your_disk> <serial(s)>"
+  exit 1
+fi
+
+MODE="$3"
+EXTENSION="$4"
+READTEST="$5"
+STRESSTEST_TESTNUMBER="$6"
+NO_DMESG="$7"
+
+echo "Mode: $MODE, Extension: $EXTENSION, Readtest: $READTEST, Stresstest: $STRESSTEST_TESTNUMBER"
+
+#
+# add new hwcheck report system (rz-admin.new)
+send2 info "$serials" "HDD"
+HDDTEST_ID="$(send2 test "$serials" "HDDTEST${STRESSTEST_TESTNUMBER}" "working" "preparing")"
+if [ -d "/run/hdd_test_status" ]; then
+  disk_name=$(echo $disk | cut -d"/" -f3)
+  file=$(grep -ril $disk_name /run/hdd_test_status/)
+
+  echo $HDDTEST_ID >> $file
+fi
+
+DISK_TYPES=$(get_device_type)
+
+# ssd dedection
+DISK_SSD="$(echo "$DISK_TYPES" | grep $serials | cut -d: -f2)"
+
+if [ -z "$DISK_SSD" ]; then
+  DISK_SSD="not_detectable"
+fi
+
+if [ "$DISK_SSD" = "ssd" ]; then
+  DISK_SSD="0"
+else
+  DISK_SSD="1"
+fi
+
+send2 test_log_json "$HDDTEST_ID" "{\"IS_HDD\":\"$DISK_SSD\"}" > /dev/null
+
+# send starting status
+send hddsmart-result "WORKING" "Start (Mode: $MODE, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+
+trap "abort ; kill -9 $$" 1 2 9 15
+
+
+  # start smarttest
+  #
+  STARTTIME="$(date +%d.%m.\ %H:%M)"
+  send hddsmart-result "WORKING" "Start (Mode: $MODE, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+  power_on_hours=$(smartctl $4 -a $disk | grep Power_On_Hours | awk '{print $10}')
+
+  echo "HDDTEST - $MODE" > $LOGDIR/hddtest-$serials.log
+  echo "$(date)" >> $LOGDIR/hddtest-$serials.log
+  echo -e "Disk: $disk $serials\n\n" >> $LOGDIR/hddtest-$serials.log
+
+  FAILED=''
+
+  check_hdd_health
+  [ -z "$FAILED" ] && check_smart_values
+  [ -z "$(cat /sys/block/${disk_wo_dev}/device/model | grep "STT_FTM28GX25H")" ] && [ -z "$FAILED" ] && start_selftest
+
+  [ -z "$FAILED" ] && start_read_test ${READTEST}
+  [ -z "$FAILED" ] && [ -z "$NO_DMESG" ] && check_dmesg
+
+  ENDTIME="$(date +%H:%Mh)"
+  RESULT="$(send2 finished "$HDDTEST_ID")"
+  echo "DISK: $serials $RESULT" > $LOGDIR/hddtest-result-$serials-$STRESSTEST_TESTNUMBER.log
+  send2 update_message "$HDDTEST_ID" "finished"
+  
+  check_result $RESULT
+  if (($? > 0 )); then
+    send hddsmart-result "ERROR" "Finished ($ERROR_CHECK, Device: $disk_wo_dev); [$STARTTIME - $ENDTIME]" "$serials" "$STRESSTEST_TESTNUMBER"
+    echo "hdd_smart_test:error $disk_wo_dev" >> $ROBOT_LOGFILE
+    echo "hdd_smart_test:error $disk_wo_dev" >> /tmp/robot.file
+  else
+    send hddsmart-result "OK" "Finished (Mode: $MODE, Device: $disk_wo_dev); [$STARTTIME - $ENDTIME]" "$serials" "$STRESSTEST_TESTNUMBER"
+  fi
+  
+#rm $LOGDIR/hddtest-$serials.log
+}
+
+function nvme_worker () {
+
+  #
+  # load report function 2
+  . $PWD/report.function
+  
+  
+  # get some important data about the disk
+  #
+  if [ "$1" -a "$2" ] ; then
+    disk=$1
+    disk_wo_dev=$(echo $disk | cut -d/ -f3)
+    serials=$2
+  else
+    echo "Usage:  $0  </dev/your_disk> <serial(s)>"
+    exit 1
+  fi
+  
+  MODE="$3"
+  EXTENSION="$4"
+  READTEST="$5"
+  STRESSTEST_TESTNUMBER="$6"
+  
+  echo "Mode: $MODE, Extension: $EXTENSION, Readtest: $READTEST, Stresstest: $STRESSTEST_TESTNUMBER"
+  #
+  # add new hwcheck report system (rz-admin.new)
+  send2 info "$serials" "HDD"
+  HDDTEST_ID="$(send2 test "$serials" "HDDTEST${STRESSTEST_TESTNUMBER}" "working" "preparing")"
+  
+  if [ -d "/run/hdd_test_status" ]; then
+    disk_name=$(echo $disk | cut -d"/" -f3)
+    file=$(grep -ril $disk_name /run/hdd_test_status/)
+
+    echo $HDDTEST_ID >> $file
+  fi
+
+  
+  send2 test_log_json "$HDDTEST_ID" "{\"IS_HDD\":\"0\"}" > /dev/null
+  
+  # send starting status
+  send hddsmart-result "WORKING" "Start (Mode: $MODE, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+  
+  trap "abort ; kill -9 $$" 1 2 9 15
+  
+  check_smart_values_nvme
+  check_nvme_error_log
+  check_nvme_fw_log
+  
+  echo "DISK: $serials $(send2 finished "$HDDTEST_ID")" > $LOGDIR/hddtest-result-$serials-$STRESSTEST_TESTNUMBER.log
+  send2 update_message "$HDDTEST_ID" "finished"
+  if [ "$(cat $LOGDIR/hddtest-result-$serials-$STRESSTEST_TESTNUMBER.log | grep test_ok)" ]; then
+    send hddsmart-result "OK" "Finished (Mode: $MODE, Device: $disk_wo_dev); [$STARTTIME - $ENDTIME]" "$serials" "$STRESSTEST_TESTNUMBER"
+  else
+    send hddsmart-result "ERROR" "Finished ($ERROR_CHECK, Device: $disk_wo_dev); [$STARTTIME - $ENDTIME]" "$serials" "$STRESSTEST_TESTNUMBER"
+  fi
+}
+
+
+#
+# check smart values nvme
+check_smart_values_nvme() {
+  # send status
+  send hddsmart-result "WORKING" "Start (NVMe-Check, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+  echo -n "SMART VALUES:" >> $LOGDIR/hddtest-$serials.log
+  echo "Start: Values Check" 
+
+  #
+  # send helathcheck to new.rz-admin
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "NVME-Check" "working" "starting")"
+  local LOGFILE="hddtest_smart.nvme.$serials.log"
+  nvme smart-log $disk > $LOGDIR/$LOGFILE
+  send2 test_log_raw "$SUBTEST_ID" "nvme_smart_log" "$LOGDIR/$LOGFILE" > /dev/null
+  send2 finished "$SUBTEST_ID" > /dev/null
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+}
+
+
+#
+# check smart values nvme
+check_nvme_error_log() {
+  # send status
+  send hddsmart-result "WORKING" "Start (NVMe-Error-Check, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+  echo "Start: NVMe Error Log" 
+
+  #
+  # send helathcheck to new.rz-admin
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "NVME-Error-Check" "working" "starting")"
+  local LOGFILE="hddtest_smart.nvme_error_log.$serials.log"
+  nvme error-log $disk > $LOGDIR/$LOGFILE
+  send2 test_log_raw "$SUBTEST_ID" "nvme_error_log" "$LOGDIR/$LOGFILE" > /dev/null
+  send2 finished "$SUBTEST_ID" > /dev/null
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+}
+
+
+#
+# check smart values nvme
+check_nvme_fw_log() {
+  # send status
+  send hddsmart-result "WORKING" "Start (NVMe-FW-Check, Device: $disk_wo_dev)" "$serials" "$STRESSTEST_TESTNUMBER"
+  echo "Start: FW-Log" 
+
+  #
+  # send helathcheck to new.rz-admin
+  local SUBTEST_ID="$(send2 subtest "$HDDTEST_ID" "FW-Check" "working" "starting")"
+  local LOGFILE="hddtest_smart.nvme_fw_log.$serials.log"
+  nvme fw-log $disk > $LOGDIR/$LOGFILE
+  send2 test_log_raw "$SUBTEST_ID" "nvme_fw_log" "$LOGDIR/$LOGFILE" > /dev/null
+  send2 finished "$SUBTEST_ID" > /dev/null
+  send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+
+}

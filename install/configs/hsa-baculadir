@@ -1,0 +1,134 @@
+#!/bin/bash
+
+
+NEW_HNAME="$(hostname -f)"
+NEW_ADDRESS=`/sbin/ifconfig eth0 | grep "inet addr:" | head -1 | awk '{print $2}'| cut -d: -f2`
+NEW_DC="$(hostname -f | cut -d. -f2)"
+
+if echo $NEW_DC | grep -Eq 'cpt[1234]|jnb[123]'; then
+  OLD_ADDRESS="41.203.16.241"
+  OLD_HNAME="masterbuild64.jnb2.host-h.net"
+  OLD_DOMAIN="jnb2.host-h.net"
+  OLD_SHNAME="masterbuild64"
+elif echo $NEW_DC | grep -Eq 'nur4|flk1'; then
+  OLD_ADDRESS="196.22.132.40"
+  OLD_HNAME="masterbuild64wheezy.jnb1.host-h.net"
+  OLD_DOMAIN="jnb1.host-h.net"
+  OLD_SHNAME="masterbuild64wheezy"
+fi
+
+
+
+echo -e "\n===============================================================\n"
+echo -e "Press any key to edit the new IP and hostname:\n"
+echo -e "  Hostname: ... old=$OLD_HNAME \t=>\t new=$NEW_HNAME"
+echo -e "  IP: ......... old=$OLD_ADDRESS \t\t=>\t new=$NEW_ADDRESS\n  "
+
+X=""
+for i in $(seq 1 10) ; do
+  echo -n "."
+  read -n1 -t1 X
+  [ "$X" ] && break
+done
+echo
+if [ "$X" ] ; then
+  echo -n "Enter hostname: "   ; read NEW_HNAME
+  echo -n "Enter IP address: " ; read NEW_ADDRESS
+fi
+echo
+
+NEW_SHNAME="$(echo $NEW_HNAME | cut -d. -f1)"
+
+
+
+echo "...Updating /etc/hosts"
+sed -i -e "s/$OLD_ADDRESS/$NEW_ADDRESS/g" /etc/hosts
+
+echo "...Activating new hostname"
+hostname $NEW_HNAME
+
+echo "...Updating /etc/hostname"
+sed -i -e "s:$OLD_HNAME:$NEW_HNAME:" /etc/hostname
+
+#Kerberos
+echo "...Installing kerberos host keytab"
+#Need to create a new tempuser with key auth to run script on master kdc host
+#/usr/sbin/useradd -m -d /home/kdcadd -s /bin/bash -e '' kdcadd
+#ssh-keygen -t dsa -P "" -f .ssh/id_dsa
+#ssh-copy-id -i .ssh/id_dsa.pub kdcadd@kdc1.cpt1.host-h.net
+echo "============== Kerberos key gen ================"
+touch /etc/krb5.keytab
+chmod 600 /etc/krb5.keytab
+su kdcadd -l -c "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no mkservtab@kdc2.cpt2.host-h.net mkservtab $NEW_HNAME" > /etc/krb5.keytab
+echo "================================================"
+userdel kdcadd
+rm -rf /home/kdcadd
+#cd /usr/local/hetzner/_inst/kerberos
+#sh install
+
+echo "...Updating /etc/fstab"
+rm /etc/fstab
+
+if echo $NEW_HNAME | grep -Eq '\.(cpt[1234]|jnb[123])\.'; then
+  srv_domain=$(echo $NEW_HNAME | awk -F\. '{print$2}' | sed 's/[0-9]*$//').host-h.net
+else
+  srv_domain="de.host-h.net"
+fi
+
+#Update the puppet config file for location
+if [ -n "$srv_domain" ]; then
+  sed -i -e "s,srv_domain\ =.*,srv_domain\ =\ $srv_domain,g" /etc/puppetlabs/puppet/puppet.conf
+fi
+
+
+linktarget=`basename "$(readlink /initrd.img)" | sed s,initrd.img-,,`
+
+mdadm --examine --scan > /etc/mdadm/mdadm.conf 2>/dev/null
+mdadm --examine --scan > /etc/mdadm/generated.conf 2>/dev/null
+
+update-initramfs -d -k $linktarget
+update-initramfs -c -k $linktarget
+
+boot_device=$(mount | awk '$3 == "/boot" {print $1}')
+cat << EOF > /etc/fstab
+proc            /proc           proc    defaults        0       0
+/dev/mapper/vg-root /               ext4    defaults,usrquota,errors=remount-ro 0       1
+${boot_device}        /boot           ext3    defaults        0       2
+/dev/mapper/vg-postgres /var/lib/postgresql     ext4    defaults,usrquota,errors=remount-ro     0       1
+/dev/mapper/vg-cache    /var/cache/bareos_catalogue_browser   ext4    defaults,usrquota,errors=remount-ro     0       1
+EOF
+
+echo -e "\n"
+rm -f /etc/udev/rules.d/*-net.rules
+
+if echo $NEW_HNAME | grep -E '\-staging[0-9]*\.'; then
+  srv_domain="staging.jnb.host-h.net"
+else
+  if echo $NEW_HNAME | grep -Eq '\.(cpt[1234]|jnb[123])\.'; then
+    srv_domain=$(echo $NEW_HNAME | awk -F\. '{print$1}' | sed 's/[0-9]*$//').host-h.net
+  elif echo $NEW_HNAME | grep -Eq '\.(dur1\.|hetzner\.africa)'; then
+    srv_domain="jnb.host-h.net"
+  else
+    srv_domain="de.host-h.net"
+  fi
+fi
+
+echo "=> Upgrading APT packages ..."
+/usr/local/bin/aptitude_upgrade
+
+#Update the puppet config file for location
+if [ -n "$srv_domain" ]; then
+  sed -i -e "s,srv_domain\ =.*,srv_domain\ =\ $srv_domain,g" /etc/puppetlabs/puppet/puppet.conf
+fi
+
+echo "Removing uptrack uuid file"
+rm -f /var/lib/uptrack/uuid
+
+echo "Removing buildtrans user"
+userdel -r buildtrans
+
+echo "Setting timezone"
+/usr/bin/timedatectl set-timezone Africa/Johannesburg
+
+echo -e "...done\n"
+echo "==============================================================="

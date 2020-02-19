@@ -1,0 +1,1953 @@
+#
+# central config file for hardware checks
+# source this file via ". filename"
+#
+# david.mayr@hetzner.de - 2007.08.03
+
+
+# ip address of the hwcheck server
+#
+SERVER_TESTRACK="192.168.100.1"      ### server of the hwcheck-rack
+SERVER_DATACENTER="88.198.31.148"   ### master bootserver in the datacenter
+
+
+# type of hddtest [ badblocks | bonnie ]
+#
+#HDDTEST_TYPE=bonnie
+#HDDTEST_TYPE=badblocks
+HDDTEST_TYPE=smart
+
+
+
+# size for bonnie++ in MB
+#
+BONNIESIZE="32768"
+
+
+# hddwipe settings
+#
+HDDWIPE_ACTIVE="true"               # de-/activate hddwipe (true/false)
+HDDWIPE_SLEEP="30"                  # time to sleep before starting hddwipe
+HDDWIPE_DOTINTERVAL="100"           # after how many blocks should a dot be displayed for progress indication?
+HDDWIPE_MODE="ODW"                 # mode: HO 1 pass mode
+#HDDWIPE_MODE="DoD5220.22-M-E"      # mode: US 3 pass mode
+#HDDWIPE_MODE="DoD5220.22-M-ECE"    # mode: US 7 pass mode
+#HDDWIPE_MODE="VSTIR"               # mode: DE 7 pass mode
+
+
+# how long to wait before start test automatically
+#
+MENUWAIT="60"
+
+
+# wget and curl command with options
+#
+WGET="wget --no-check-certificate -q --timeout=600 -O/tmp/result"
+CURL="curl -s -k --max-time 600 --retry 3 -X PUT"
+
+
+# name of the test file to test the network connection
+#
+TESTFILE_TESTRACK="4096M"
+TESTFILE_DATACENTER="100M"
+
+
+# name of the compressed kernel file to test kernel compilation
+#
+KERNELFILE="data/linux-2.6.30.1.tar.bz2"
+
+
+# how often should the kernel be compiled
+#
+COMPILECOUNT="2"
+
+
+# test file size for short test in MB
+#
+SHORTTESTSIZE="4096"
+
+
+# how many CPU stress tests to run
+#
+CPUTESTCOUNT_TESTRACK="60"
+CPUTESTCOUNT_DATACENTER="15"
+
+
+# how long should each cpu stress test run (in seconds)
+#
+CPUTESTTIME="60"
+
+
+# how often should memtest run?
+#
+MEMTESTCOUNT="2"
+
+
+# how much mem (in MB) should remain free while memtest
+#
+MEM_REMAIN="256"
+
+
+# what is the name of the 3ware/Adaptec/LSI raid controller cli tool
+#
+TW_RAIDTOOL="tw_cli"
+AD_RAIDTOOL="arcconf"
+LSI_RAIDTOOL="megacli"
+
+# log directory
+#
+LOGDIR="/root/hwcheck-logs"
+mkdir -p $LOGDIR
+
+
+# log file name
+#
+file="$0" ; [ "$file" = "-bash" ] && file="test"
+LOGFILE="$(basename $file)"
+# Logfile for the robot
+ROBOT_LOGFILE="$LOGDIR/robot_logfile.txt"
+
+# log command
+#
+LOG="tee -a $LOGDIR/$LOGFILE"
+
+
+# set pipefile bash option, see bash manual
+#
+set -o pipefail
+
+
+# init logfile
+#
+:> $LOGDIR/$LOGFILE
+
+
+# beep tool
+#
+BEEP="/usr/bin/beep"
+
+# set benchmark directory 
+#
+MACHINE=$(uname -m)
+if [ "$MACHINE" = "i686" ]; then
+  BM_DIR=/root/.oldroot/nfs/check/benchmark/32
+else
+  BM_DIR=/root/.oldroot/nfs/check/benchmark/64
+fi
+
+# set benchmark allowed variable
+BENCHMARK_ALLOWED="no"
+
+VERSION="$(cat /root/.oldroot/nfs/check/VERSION)"
+
+#################
+### FUNCTIONS ###
+#################
+
+
+
+
+# echo colored output
+#
+echo_grey() {
+  echo -e "\033[01;30m$*\033[00m"
+}
+echo_red() {
+  echo -e "\033[01;31m$*\033[00m"
+}
+echo_green() {
+  echo -e "\033[01;32m$*\033[00m"
+}
+echo_yellow() {
+  echo -e "\033[01;33m$*\033[00m"
+}
+echo_blue() {
+  echo -e "\033[01;34m$*\033[00m"
+}
+echo_pink() {
+  echo -e "\033[01;35m$*\033[00m"
+}
+echo_cyan() {
+  echo -e "\033[01;36m$*\033[00m"
+}
+echo_white() {
+  echo -e "\033[01;37m$*\033[00m"
+}
+
+
+
+
+# get mac address of network interface
+#
+get_mac() {
+  # use first parameter as device name, if present
+  if [ -z "$1" ]; then
+    DEVICE="$(ip r | awk '{ if ($1=="default") {print $5} }')"
+    if [ -z "$DEVICE" ]; then
+      DEVICE="eth0"
+    fi
+  else  DEVICE="$1"
+  fi
+
+  # get the MAC with ip
+  ip a l dev $DEVICE|grep "link/ether" | awk '{print $2}'
+}
+
+
+
+# get ip address of network interface
+#
+get_ip() {
+  # use first parameter as device name, if present
+  if [ "$1" ] ;then
+    dev="$1"
+  else 
+    dev=$(ip a show | grep "$(sed -n 's/-/:/g;s/.*BOOTIF=01:\(.*\)$/\1/p' /proc/cmdline | cut -d' ' -f1)" -B1 | grep -m1 -oE "eth([[:digit:]])")
+  fi
+  # get the IP with ip
+  ip="$(ip a show $dev | grep -m1 inet | tr -s ' ' | cut -d' ' -f3 | cut -d/ -f1)"
+  echo "$ip"
+}
+
+
+
+
+# - activate tests, that may (after confirmation) delete the hard disks?
+# - use testfile depending on ip (testrack or datacenter?)
+#
+if get_ip | egrep "^192\.168\." >/dev/null ; then
+  HDD_TESTS_ACTIVE="true"
+  TESTFILESIZE="$TESTFILE_TESTRACK"
+  TESTFILE="data/TESTFILE_$TESTFILESIZE"
+  SERVER="$SERVER_TESTRACK"
+  CPUTESTCOUNT="$CPUTESTCOUNT_TESTRACK"
+  BENCHMARK_ALLOWED="yes"
+  PROTO="http"
+# special check for HW-Bau RZ13
+elif get_ip | egrep "^10\." >/dev/null; then
+  HDD_TESTS_ACTIVE="false"
+  TESTFILESIZE="$TESTFILE_DATACENTER"
+  TESTFILE="data/TESTFILE_$TESTFILESIZE"
+  SERVER="$SERVER_DATACENTER"
+  CPUTESTCOUNT="$CPUTESTCOUNT_DATACENTER"
+  PROTO="https"
+  SPECIAL_HWBAU="true"
+# normal customer view
+else
+  HDD_TESTS_ACTIVE="false"
+  TESTFILESIZE="$TESTFILE_DATACENTER"
+  TESTFILE="data/TESTFILE_$TESTFILESIZE"
+  SERVER="$SERVER_DATACENTER"
+  CPUTESTCOUNT="$CPUTESTCOUNT_DATACENTER"
+  PROTO="https"
+  SPECIAL_HWBAU="false"
+fi
+MONITOR_URL="$PROTO://$SERVER"
+
+
+
+
+
+
+# get all harddisks and their size
+#
+get_disks() {
+  awk '{ if($4 ~ /^([hsv]d[a-z]+|nvme[0-9]+n[0-9]+)$/) print "/dev/"$4":"$3 }' /proc/partitions
+}
+
+
+
+
+# get all partitions of all disks
+#
+get_partitions() {
+  sfdisk -q -l 2>/dev/null | grep "^/dev/" | grep -v "Empty"
+}
+
+
+
+# are there any partitions?
+#
+partitions_exist() {
+  if [ -z "$(get_partitions)" ]
+  then return 1
+  else return 0
+  fi
+}
+
+
+
+# sleep some time and print dots ...
+#
+sleep_dots() {
+  count=1
+  max=$1
+  until [ $count -gt $max ] ; do
+    sleep 1
+    echo -en '.'
+    count=$(( $count + 1 ))
+  done
+  echo
+}
+
+
+
+# get cpu info
+#
+get_cpu() {
+  cat /proc/cpuinfo | grep "model name" | tr -s ' ' | cut -d: -f2 | cut -d\  -f2- | uniq
+}
+
+
+
+# get ram info
+#
+get_ram() {
+  memkb="$(cat /proc/meminfo | grep "MemTotal" | tr -s ' ' | cut -d\  -f2)"
+  echo $(( $memkb / 1024 ))
+}
+
+# check if memory ECC is enabled
+#
+get_ecc_enabled() {
+  if [ -n "$(dmidecode -t 16 2>/dev/null | grep -E 'Error Correction Type.*None')" ]; then
+    echo "false"
+  else
+    echo "true"
+  fi
+}
+
+
+# get hdd info
+#
+get_hdd() {
+  output=""
+  for disk in $(get_disks) ; do
+    devnode=$(echo $disk | cut -d: -f1 | cut -d/ -f3)
+    sizekb=$(echo $disk | cut -d: -f2)
+    if [ "$sizekb" -gt "1048576" ] ; then
+      size="$(( $sizekb / 1024 / 1024))GB"
+    else
+      size="$(( $sizekb / 1024 ))MB"
+    fi
+    if [ "$1" = "lines" ] ; then
+      output="$devnode:$size\n$output"
+    else
+      output="$devnode:$size $output"
+    fi
+  done
+  echo -e "$output"
+}
+
+
+#
+# get_hdd_sector
+get_hdd_sectors() {
+  for disk in $(get_hdd) ; do
+    local device=$(echo $disk | cut -d: -f1 )
+    local sector=$(hdparm -I /dev/$device 2>/dev/null | sed -n 's/.*Physical.*:\ *\([[:digit:]]\+\)\ .*/\1/p')
+    echo "$device:$sector"
+  done
+}
+
+
+# get raid controller info
+#
+get_raid() {
+  lspci | egrep "3ware|Adaptec|LSI"
+}
+get_3ware() {
+  get_raid | grep "3ware"
+}
+get_adaptec() {
+  get_raid | grep "Adaptec"
+}
+get_lsi() {
+  get_raid | grep "LSI"
+}
+
+
+# get mainboard model
+#
+get_mainboard() {
+  mainboard=$(dmidecode -t baseboard 2>/dev/null | sed -ne 's/.*Product\ Name:\ \(.*\)$/\1/p')
+  mbver=$(dmidecode -t baseboard 2>/dev/null | sed -ne 's/.*Version:\ \(.*\)$/\1/p' | tail -n1)
+  echo $mainboard $mbver
+}
+
+
+# get bios version
+#
+get_bios_version() {
+  bios=$(dmidecode -t bios 2>/dev/null | sed -ne 's/.*Version:\ \(.*\)$/\1/p')
+  reldate=$(dmidecode -t bios 2>/dev/null | sed -ne 's/.*Release\ Date:\ \(.*\)$/\1/p')
+  echo $bios $reldate
+}
+
+# get installed gpu
+#
+get_gpu() {
+  line=$(lspci | grep -Po 'VGA[\w ]+: \K.*$')
+  echo "${line%% (rev*}"
+}
+
+
+#
+#
+get_pci_devices() {
+  pci_devices=$( lspci | egrep -iv 'Host bridge:|SMBus:|PCI bridge:|USB Controller:|ISA bridge:|Intel Corporation QuickPath Architecture I/O Hub' | cut -d ' ' -f2- )
+  echo "$pci_devices"
+}
+
+
+
+#
+#
+get_usb_devices() {
+  usb_devices=$( lsusb | egrep -v 'Linux Foundation 1.1 root hub|Linux Foundation 2.0 root hub|Linux Foundation 3.0 root hub|Intel Corp. Integrated Rate Matching Hub' )
+  echo "$usb_devices"
+}
+
+
+
+# send info via HTTP GET to the monitoring server
+#
+send() {
+  # do not send to old rzadmin
+  return
+
+  [ -f $LOGDIR/curl-result ] && rm $LOGDIR/curl-result
+  local status="$2"
+  local message="$(echo $3 | sed 's/ /%20/g' | sed 's/\[/\\\[/g' | sed 's/\]/\\\]/g')"
+  local log="$4"
+
+  case $1 in
+    cpu-info|cpu_info|cpu)
+      get_cpu >$LOGDIR/cpu
+      URL="$MONITOR_URL/report/$(get_mac)/cpu?ip=$(get_ip)"
+#    echo "$CURL -T $LOGDIR/cpu -H \"Expect: \" \"$URL\" >$LOGDIR/curl-result"
+      $CURL -T $LOGDIR/cpu -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    ram-info|ram_info|ram)
+      get_ram >$LOGDIR/ram
+      URL="$MONITOR_URL/report/$(get_mac)/ram?ip=$(get_ip)"
+      $CURL -T $LOGDIR/ram -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    hdd-info|hdd_info|hdd)
+      get_hdd >$LOGDIR/hdd
+      URL="$MONITOR_URL/report/$(get_mac)/hdd?ip=$(get_ip)"
+      $CURL -T $LOGDIR/hdd -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    pci_devices|pci-devices|pci)
+      get_pci_devices >$LOGDIR/pci_devices
+      URL="$MONITOR_URL/report/$(get_mac)/pci?ip=$(get_ip)"
+      $CURL -T $LOGDIR/pci_devices -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    usb_devices|usb-devices|usb)
+      get_usb_devices >$LOGDIR/usb_devices
+      URL="$MONITOR_URL/report/$(get_mac)/usb?ip=$(get_ip)"
+      $CURL -T $LOGDIR/usb_devices -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    mainboard_model|mainboard-model|mainboard)
+      get_mainboard >$LOGDIR/mainboard_model
+      URL="$MONITOR_URL/report/$(get_mac)/mainboard?ip=$(get_ip)"
+      $CURL -T $LOGDIR/mainboard_model -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    bios_version|bios-version|bios)
+      get_bios_version >$LOGDIR/bios_version
+      URL="$MONITOR_URL/report/$(get_mac)/bios?ip=$(get_ip)"
+      $CURL -T $LOGDIR/bios_version -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+  ###
+    rescue_status)
+      echo -e "$(cat /proc/cmdline)\n\n$(w)" >$LOGDIR/rescue_status
+      PROCS="$(ps ax | wc -l)"
+      USERS="$(who | wc -l)"
+      URL="$MONITOR_URL/report/$(get_mac)/rescue_status?procs=$PROCS&users=$USERS&ip=$(get_ip)"
+      $CURL -T $LOGDIR/rescue_status -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+  ###
+    alive|livesign)
+      dmesg | tail -n10 >$LOGDIR/dmesg
+      URL="$MONITOR_URL/report/$(get_mac)/alive?ip=$(get_ip)"
+      $CURL -T $LOGDIR/dmesg -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+  ###
+    reset)
+      $WGET "$MONITOR_URL/report/$(get_mac)/reset?ip=$(get_ip)"
+      echo "ok" >$LOGDIR/curl-result #set ok for request check
+      exitcode=$?
+    ;;
+  ###
+    remove)
+      $WGET "$MONITOR_URL/report/$(get_mac)/remove?ip=$(get_ip)"
+      echo "ok" >$LOGDIR/curl-result #set ok for request check
+      exitcode=$?
+    ;;
+ ###
+    hwc-finished)
+      if [ "$status" != "all" ]; then
+        status=""
+      fi
+
+      $WGET "$MONITOR_URL/report/$(get_mac)/hwc_finished?mode=$status"
+      echo "ok" >$LOGDIR/curl-result #set ok for request check
+      exitcode=$?
+    ;;
+  ###
+    hwc-status)
+      if [ "$status" != "started" ] && [ "$status" != "finished" ]; then
+        status=""
+      fi
+      $WGET "$MONITOR_URL/report/$(get_mac)/hwc_status?mode=$status"
+      echo "ok" >$LOGDIR/curl-result #set ok for request check
+      exitcode=$?
+    ;;
+  ###
+    shorttest-result|shorttest_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/SHORTTEST/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    hdd-result|hdd_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/HDD/$status/$message?ip=$(get_ip)"
+      if [ "$LOGFILE" = "hddtest_badblocks_worker.sh" ] ; then
+        # remove block numbers from status data
+        cat $LOGDIR/$LOGFILE | sed 's/\x08//g' | tr -s ' ' | sed -e 's/\/ //g' \
+          -e 's/[0-9].*elapsed//g' | tee -a $LOGDIR/$LOGFILE.tmp
+        cp $LOGDIR/$LOGFILE.tmp $LOGDIR/$LOGFILE
+      fi
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    erasehdd-result|erasehdd_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/ERASE/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    dmesg-result|dmesg_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/DMESG/$status/$message?ip=$(get_ip)"
+      # remove specical chars from status data
+      cat $LOGDIR/$LOGFILE | sed -e 's/\x08.*\x08//g' -e 's/: */: /g' | tee -a $LOGDIR/$LOGFILE.tmp
+      cp $LOGDIR/$LOGFILE.tmp $LOGDIR/$LOGFILE
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    ram-result|ram_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/RAM/$status/$message?ip=$(get_ip)"
+      # remove specical chars from status data
+      cat $LOGDIR/$LOGFILE | sed -e 's/\x08.*\x08//g' -e 's/: */: /g' | tee -a $LOGDIR/$LOGFILE.tmp
+      cp $LOGDIR/$LOGFILE.tmp $LOGDIR/$LOGFILE
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    cpu-result|cpu_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/CPU/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    nic-result|nic_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/NIC/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    compile-result|compile_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/COMPILE/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    3ware-result|3ware_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/3WARE/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    adaptec-result|adaptec_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/ADAPTEC/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    lsi-result|lsi_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/LSI/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    hddwipe-result|hddwipe_result)
+      hddserial="$4"
+      message="$3"
+      URL="$MONITOR_URL/report/$(get_mac)/result/HDDWIPE-$hddserial/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    hddtest-result|hddtest_result)
+      hddserial="$4"
+      message="$(echo $3 | sed -e 's/ /%20/g' -e 's/\[/\\\[/g' -e 's/\]/\\\]/g' -e 's/:/%3a/g' -e 's/\./%2e/g')"
+      URL="$MONITOR_URL/report/$(get_mac)/result/HDDTEST-$hddserial/$status/$message?ip=$(get_ip)"
+      if [ "$LOGFILE" = "hddtest_badblocks_worker.sh" ] ; then
+        # remove block numbers from status data
+        if [ -e $LOGDIR/hddtest-$hddserial.log ]; then
+          cat $LOGDIR/hddtest-$hddserial.log | sed 's/\x08//g' | tr -s ' ' | sed -e 's/\/ //g' \
+            -e 's/[0-9].*elapsed//g' | tee -a $LOGDIR/hddtest-$hddserial.log.tmp
+        fi
+      fi
+
+      if [ -e $LOGDIR/hddtest-$hddserial.log.tmp ]; then
+        $CURL -T $LOGDIR/hddtest-$hddserial.log.tmp -H "Expect: " "$URL" >$LOGDIR/curl-result
+      else
+        # do nut use HTTP method PUT here, because we did not get any logfile
+        curl -s --max-time 600 -H "Expect: " "$URL" >$LOGDIR/curl-result
+      fi
+      exitcode=$?
+    ;;
+    hddsmart-result|hddsmart_result)
+      local hddserial="$4"
+      local testnumber="$5"
+      local message="$(echo $3 | sed -e 's/ /%20/g' -e 's/\[/\\\[/g' -e 's/\]/\\\]/g' -e 's/:/%3a/g' -e 's/\./%2e/g')"
+      local URL="$MONITOR_URL/report/$(get_mac)/result/HDDTEST${testnumber}-$hddserial/$status/$message?ip=$(get_ip)"
+      touch $LOGDIR/hddtest-$hddserial.log
+      $CURL -T $LOGDIR/hddtest-$hddserial.log -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    benchmark-cpu-result|bm-cpu-result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/BM-CPU/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    benchmark-hdd-result|bm-hdd-result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/BM-HDD/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    benchmark-ram-result|bm-ram-result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/BM-RAM/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    benchmark-net-result|bm-net-result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/BM-NET/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    benchmark-apache-result|bm-apache-result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/BM-APACHE/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    update-bios-result|update-bios_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/UPDATE-BIOS/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    stresstest-summary-result|stresstest_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/SUMMARY/$status/$message?ip=$(get_ip)"
+      if [ -e $LOGDIR/summary.log ]; then
+        $CURL -T $LOGDIR/summary.log -H "Expect: " "$URL" >$LOGDIR/curl-result
+      else
+        $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      fi
+      exitcode=$?
+    ;;
+    stresstest-hdd-result|stresstest_hdd_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/HDD-VALUE-COMPARE/$status/$message?ip=$(get_ip)"
+      if [ -e $LOGDIR/stresstest-smart-value.log ]; then
+        $CURL -T $LOGDIR/stresstest-smart-value.log -H "Expect: " "$URL" >$LOGDIR/curl-result
+      else
+        $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      fi
+      exitcode=$?
+    ;;
+    stresstest-result|stresstest_ram_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/STRESSTEST/$status/$message?ip=$(get_ip)"
+      if [ -e $LOGDIR/stressapptest.log ]; then
+        $CURL -T $LOGDIR/stressapptest.log -H "Expect: " "$URL" >$LOGDIR/curl-result
+      else
+        $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      fi
+      exitcode=$?
+    ;;
+    stresstest-temp-result|stresstest_temp_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/STRESSTEST-CPU-Temp/$status/$message?ip=$(get_ip)"
+      if [ -e $LOGDIR/stresstest-temp-error.log ]; then
+        $CURL -T $LOGDIR/stresstest-temp-error.log -H "Expect: " "$URL" >$LOGDIR/curl-result
+      else
+        $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      fi
+      exitcode=$?
+    ;;
+    stresstest-temp-min|stresstest_temp_min)
+      URL="$MONITOR_URL/report/stresstest"
+      curl -s -k --max-time 600 --retry 3 -X POST -d "mac=$(get_mac)&key=1&value=$2" -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    stresstest-temp-max|stresstest_temp_max)
+      URL="$MONITOR_URL/report/stresstest"
+      curl -s -k --max-time 600 --retry 3 -X POST -d "mac=$(get_mac)&key=2&value=$2" -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    stresstest-temp-avg-all|stresstest_temp_avg_all)
+      URL="$MONITOR_URL/report/stresstest"
+      curl -s -k --max-time 600 --retry 3 -X POST -d "mac=$(get_mac)&key=3&value=$2" -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    stresstest-temp-avg-over|stresstest_temp_avg_over)
+      URL="$MONITOR_URL/report/stresstest"
+      curl -s -k --max-time 600 --retry 3 -X POST -d "mac=$(get_mac)&key=4&value=$2" -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    stresstest-temp-count|stresstest_temp_count)
+      URL="$MONITOR_URL/report/stresstest"
+      curl -s -k --max-time 600 --retry 3 -X POST -d "mac=$(get_mac)&key=5&value=$2" -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    reset-bmc-result|reset-bmc_result)
+      URL="$MONITOR_URL/report/$(get_mac)/result/RESET-BMC/$status/$message?ip=$(get_ip)"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+    test-result|test_result)
+      URL="$MONITOR_URL/report/reset_lara"
+      $CURL -T $LOGDIR/$LOGFILE -H "Expect: " "$URL" >$LOGDIR/curl-result
+      exitcode=$?
+    ;;
+  ###
+    *)
+      echo_red "ERROR sending data: wrong parameter ($@)"
+    ;;
+  esac
+  if [ "$exitcode" -ne "0" ] ; then
+    echo_red "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)"
+  fi
+  # request check
+  local RESULT="$(cat $LOGDIR/curl-result)"
+  #if [ "$RESULT" != "ok" ]; then
+  #  echo_red "ERROR RZ-Admin returned: $RESULT"
+  #  echo_red "$1 - Retry to send status in 30 seconds"
+  #  sleep 30
+  #  send "$@"
+  #fi
+}
+
+
+# send hddwipe status via HTTP to the monitoring server
+#
+send_hddwipe_status() {
+  serial="$1"
+  status="$2"
+  size="$3"
+  mac="$4"
+  model="$(echo $5   | sed -e 's/ /%20/g' -e 's/\[/\\\[/g' -e 's/\]/\\\]/g' -e 's/:/%3a/g' -e 's/\./%2e/g')"
+  message="$(echo $6 | sed -e 's/ /%20/g' -e 's/\[/\\\[/g' -e 's/\]/\\\]/g' -e 's/:/%3a/g' -e 's/\./%2e/g')"
+
+  log="$LOGDIR/hddwipe-$serial.log"
+  [ -f "$log" ] || touch $log
+  cat "$log" | sed -e "s/\x1b\[0[01];[0-9]*m//g" -e "s/\x1b\[00m//g" > $log.tmp
+  
+  URL="$MONITOR_URL/harddisk/report/$serial/$status/$size/$mac/$model/$message?ip=$(get_ip)"
+  $CURL -T "$log.tmp" -H "Expect: " "$URL" >$LOGDIR/curl-result
+  exitcode=$?
+
+  send hddwipe-result "$status" "$message" "$serial"
+
+  if [ "$exitcode" -ne "0" ] ; then
+    echo_red "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)"
+  fi
+}
+
+
+# send hddwipe reset via HTTP to the monitoring server
+#
+send_hddwipe_reset() {
+  serial="$1"
+  URL="$MONITOR_URL/harddisk/reset/$serial?ip=$(get_ip)"
+  $CURL -T /dev/null -H "Expect: " "$URL" >$LOGDIR/curl-result
+  exitcode=$?
+  if [ "$exitcode" -ne "0" ] ; then
+    echo_red "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)"
+  fi
+}
+
+
+# beep via the pc speaker
+#
+beep() {
+  $BEEP
+}
+beep1() {
+  $BEEP -f750 -r3 -d75
+}
+beep2() {
+  $BEEP -f1000 -r5 -d100
+}
+beep3() {
+  $BEEP -f1750 -r3 -d75
+}
+beep4() {
+  $BEEP -f2500 -r5 -d100
+}
+
+
+# catch error (exitcode!=0)
+#
+catch_error() {
+  if [ $? != 0 ] || [ "$2" == "ERROR" ] ; then
+    if [ -z "$1" ]
+      then MSG="Undefined ERROR"
+      else MSG="$1"
+    fi
+    if [ -z "$ERRORMSG" ]
+      then
+        ERRORMSG="$MSG"
+        echo_red "ERROR: $MSG  (reporting later)"
+      else ERRORMSG="$ERRORMSG, $MSG"
+    fi
+  fi
+}
+
+
+
+# ask if disk(s) should really be deleted when paritions exist
+#
+ask_delete_partitions() {
+  force_delete_file="/tmp/delete_$(get_mac)"
+  [ -e "$force_delete_file" ] && rm "$force_delete_file"
+  if $(partitions_exist) ; then
+    echo_red "===>  !WARNING!  <==="
+    echo_red "---------------------\n"
+    echo_red "There are partitions existing on the harddisk(s):"
+    sfdisk -l ; echo
+    echo_red "All data on the disk(s) will be deleted!\n"
+    beep2
+    echo -n "Do you really want to continue? [N/y] "
+    until [ "$REALLY" ] ; do
+      read -n1 -t5 REALLY
+      if [ -e "$force_delete_file" ] ; then
+        rm "$force_delete_file"
+        echo_green "\nAnswered 'y' remotely ..."
+        REALLY=y
+      fi
+    done
+    echo
+    if [ "$REALLY" != "y" -a "$REALLY" != "Y" ] ; then
+      echo_green "Aborted ..."
+      sleep 1
+      kill -2 $$
+    fi
+  else
+    echo_white "No partitions found on the disk(s)."
+  fi
+}
+
+
+
+# check if hddwipe is allowed - ask robot database if the
+# server of this IP is cancelled since at least 24 hours
+hddwipe_allowed() {
+  # if there is a EQ model, wipe instantly
+
+  URL="https://admin-robot.your-server.de/admin/api/wipe_allowed/$(get_ip)"
+  $CURL -H 'Content-Length: 0' -H "Expect: " "$URL" >$LOGDIR/hddwipe_allowed
+  exitcode=$?
+  if [ "$exitcode" -ne "0" ] ; then
+    echo_red "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)"
+  fi
+  [ "$(cat $LOGDIR/hddwipe_allowed)" = "true" ] && return 0 || return 1
+}
+
+
+
+# ask if disk(s) should really be deleted
+#
+ask_hddwipe() {
+  force_delete_file="/tmp/delete_$(get_mac)"
+  [ -e "$force_delete_file" ] && rm "$force_delete_file"
+  if [ "$(get_hdd)" ] ; then
+    echo -e "\n\n"
+    echo_red "===>  !WARNING!    !WARNING!    !WARNING!    !WARNING!  <==="
+    echo_red "------------------------------------------------------------\n"
+    echo_red "ALL harddisk(s) will be DELETED and OVERWRITTEN:  $(get_hdd)\n"
+    beep2 ; sleep 0.5 ; beep2 ; sleep 0.5 ; beep2
+    echo -n "Do you REALLY want to continue? [N/y] "
+    until [ "$REALLY" ] ; do
+      read -n1 -t5 REALLY
+      if [ -e "$force_delete_file" ] ; then
+        rm "$force_delete_file"
+        echo_green "\nAnswered 'y' remotely ..."
+        REALLY=y
+      fi
+    done
+    echo
+    if [ "$REALLY" != "y" -a "$REALLY" != "Y" ] ; then
+      echo_green "Aborted ..."
+      sleep 1
+      kill -2 $$
+    fi
+  else
+    echo_white "No disks found!"
+  fi
+}
+
+
+
+# prepare logdata to be sent to the monitor server
+#
+get_logdata() {
+  cat $LOGDIR/$LOGFILE | sed -e 's/\n/<br>/g' -e 's/\//\\/g'
+}
+
+
+# send status depending on $ERRORMSG
+#
+send_status() {
+  RESULTNAME=$1
+  LOGDATA="$(get_logdata)"
+  if [ -z "$ERRORMSG" ] ; then
+    echo_green "=====> OK  -  Sending status to monitor server ... "
+    send $RESULTNAME "OK" "[$STARTTIME-$ENDTIME]" "$LOGDATA"
+  else
+    echo_red "=====> ERROR  -  Sending status to monitor server ... "
+    send $RESULTNAME "ERROR" "$ERRORMSG  [$STARTTIME-$ENDTIME]" "$LOGDATA"
+  fi
+}
+
+
+get_hdd_serial() {
+  local hdd="$1"
+  local type="$2"
+  local lsi_jbod
+
+  if $(udevadm info --query=all --name=$hdd | grep -qi ID_BUS=usb); then
+    echo ""
+  else
+    hdd_info=$(hdparm -I $hdd 2>/dev/null)
+    if [ "$(echo "$hdd_info" | grep -i serial | wc -l )" -lt 1 ]; then
+      hdd_info=$(smartctl -i $hdd 2>/dev/null)
+      if [ "$type" == "extend" ]; then
+        lsi_jbod=":JBOD"
+      fi
+    fi
+    [[ ${hdd_info} =~ Serial\ [nN]umber:\ +([^[:cntrl:]]+) ]]
+    serial=$(echo "${BASH_REMATCH[1]}" | sed -e "s/ //" -e "s/^WD-//" -e 's/^\(MN1270\|MN3220\|MN1220\|MN1240\|MN1221\|MN1020\|MN5220\|PL2331\|PL1331\|PN1131\|PN1133\|PN1134\|PN1138\|PN1331\|PN1186\|PN2331\|PN2134\|PN2138\|PN2161\|PN2181\|PN1334\|PN1338\|PN2186\|PN2334\|PN2338\|JP2940\|JP9960\)//g')
+    if [ -n "$serial" ]; then
+      echo "$serial$lsi_jbod"
+    fi
+  fi
+}
+
+get_hdd_target() {
+  vendor="$1"
+
+  HWDISKINFO=""
+  #
+  # get target and device name
+  for DEVICE in $(ls /sys/block/ | grep -e 'sd[a-z]' ); do 
+    #
+    # TARGET-ID
+    if [ "$(cat /sys/block/$DEVICE/device/vendor | egrep -i "$vendor")" ]; then
+      #
+      # PCI-ID for LSI Controller
+      HWDISKINFO="$HWDISKINFO$(echo -n "$(ls /sys/block/$DEVICE/device/scsi_device/)>"; echo -e "${DEVICE}<>" )"
+    fi
+    #
+    # JBOD flag fr Adaptec
+    local device_level="$(cat /sys/block/$DEVICE/device/level 2>/dev/null)"
+    if [ "Adaptec" = "$vendor" -o "ASR8160" ] && [ "$device_level" = "JBOD" -o "$device_level" = "Volume" ]; then
+      HWDISKINFO="$HWDISKINFO$(echo -n "$(ls /sys/block/$DEVICE/device/scsi_device/)>"; echo -e "${DEVICE}>JBOD<>" )"
+    fi
+  done
+  echo $HWDISKINFO | sed -e 's/<>/\n/g' | grep -v ^$
+}
+
+get_3ware_hdd_serials() {
+
+  raid_dev="$(get_hdd_target AMCC)"
+  serials=''
+  controllers=$(/usr/local/bin/tw_cli info | grep ^c | awk '{print $1}')
+  for controller in $controllers ; do
+    units=$(/usr/local/bin/tw_cli /$controller show | grep ^u | awk '{print $1}')
+    for unit in $units; do
+      devices=$(/usr/local/bin/tw_cli /$controller/$unit show | grep -e 'p[0-9][0-9]*' | awk '{print $6}')
+      for device in $devices ; do
+        if [ "$1" == "extend" ]; then
+          local system_dev="$(echo "$raid_dev" | grep "^$(echo $controller | sed 's/c//g'):[0-9]:$(echo $unit | sed 's/u//g'):" | cut -d'>' -f2 | head -n 1)"
+          local serial_3ware="$(/usr/local/bin/tw_cli /$controller/$device show serial | cut -d= -f2 | sed -e 's/ //g' -e '/^ *$/d' -e 's/^\(MN1270\|MN3220\|MN1240\|MN1220\|MN1221\|MN5220\|PL1331\|PL2331\|PN1131\|PN1133\|PN1138\|PN1186\|PN1331\|PN1338\|PN2138\|PN2186\|PN2331\|PN2338\|JP2940\|JP9960\|WD-\)//g')"
+          echo "$system_dev:$serial_3ware:$device"
+        fi
+        if [ -z "$1" ]; then
+          local system_dev="$(echo "$raid_dev" | grep "^$(echo $controller | sed 's/c//g'):[0-9]:$(echo $unit | sed 's/u//g'):" | cut -d'>' -f2 | head -n 1)"
+          local serial_3ware="$(/usr/local/bin/tw_cli /$controller/$device show serial | cut -d= -f2 | sed -e 's/ //g' -e '/^ *$/d' -e 's/^\(MN1270\|MN3220\|MN1240\|MN1220\|MN1221\|MN5220\|PL1331\|PL2331\|PN1131\|PN1133\|PN1138\|PN1186\|PN1338\|PN1331\|PN2138\|PN2186\|PN2331\|PN2338\|JP2940\|JP9960\)//g')"
+          echo "$system_dev:$serial_3ware"
+        fi
+      done
+    done
+  done
+}
+
+
+get_adaptec_hdd_serials() {
+
+  extend=$1
+
+  HWDISKINFO="$(get_hdd_target '(Adaptec|ASR8405)')"
+
+  adaptec_controller_count=$(get_raid | grep "Adaptec" | wc -l)
+  count=1
+  while [ $count -le $adaptec_controller_count ]; do
+
+    adaptec_config=$(arcconf getconfig $count LD | egrep -o "Logical Device [Nn]umber [0-9]+|(Device|Slot):[0-9].*" | sed -e 's/^[SD]/=D/g' -e 's/Logical Device [Nn]umber /Logical:/g' -e 's/) */:/g' | sed -e :a -e '$!N;s/\n=/ /;ta' -e 'P;D')
+    for LOGICAL_NUM in $(echo "$adaptec_config" | egrep -o "Logical:[0-9]+" | egrep -o "[0-9]+" | sed 's/\n/ /g'); do 
+      TARGET_DEV=$(echo "$HWDISKINFO" | grep -m 1 "[0-9]:0:$LOGICAL_NUM:")
+      DEVICE_NAME=$(echo "$TARGET_DEV" | cut -d'>' -f2)
+      HWDISKINFO=$(echo "$HWDISKINFO" | grep -v "$TARGET_DEV")
+      for DEVICE in $(echo "$adaptec_config" | grep "Logical:$LOGICAL_NUM " | sed -e 's/ /\n/g' | grep "^D"); do 
+        # awk 'BEGIN {FS="0000N"} {print $1}'
+        SERIAL=$(echo $DEVICE | cut -d: -f3 | sed -e '/.*0000.*/ s/\(.*\)0000.*/\1/g; s/^\(MN1020\|MN1120\|MN1270\|MN3220\|MN1240\|MN1220\|MN1221\|MN5220\|PL2331\|PL1331\|PN1131\|PN1138\|PN1138\|PN1338\|PN2331\|PN1331\|PN1134\|PN1181\|PN1186\|PN213\|PN21864\|PN2338\|PN2361\|PN2138\|PN2161\|PN2181\|PN1334\|PN2334\|JP2940\|JP9960\|WD-\)//g')
+        echo "$DEVICE_NAME:$SERIAL"
+      done
+    done
+    count=$(( count+1 ))
+  done
+  if [ "$(echo $HWDISKINFO | grep JBOD)" ]; then
+    for device in $(echo "$HWDISKINFO" | grep JBOD); do
+      DEVICE_NAME=$(echo $device | cut -d'>' -f2)
+      SERIAL=$(smartctl -i /dev/$DEVICE_NAME | grep -ie "Serial\ Number:\ * .*" | cut -d: -f2 | sed -e 's/\ //g;/.*0000.*/ s/\(.*\)0000.*/\1/g;s/^\(MN1020\|MN1120\|MN1270\|MN3220\|MN1240\|MN1220\|MN1221\|MN5220\|PL2331\|PL1331\|PN1131\|PN1133\|PN1138\|PN1186\|PN1338\|PN2331\|PN1134\|PN1181\|PN2134\|PN2138\|PN2186\|PN2338\|PN2361\|PN2161\|PN2181\|PN1331\|PN1334\|PN2334\|JP2940\|JP9960\|WD-\)//g')
+      if [ "$extend" ]; then
+        echo "$DEVICE_NAME:$SERIAL:JBOD"
+      else
+        echo "$DEVICE_NAME:$SERIAL"
+      fi
+    done
+  fi
+}
+
+#
+# get all lsi hdd device id and device name (like /dev/sda)
+get_lsi_hdd_device(){
+
+  HWDISKINFO="$(get_hdd_target "LSI|DELL|AVAGO")"
+  DISK_GROUPS="$(echo "$HWDISKINFO" | sed 's/:.*//g' | uniq)"
+
+  for controller in $(seq 0 $(($(lspci | grep -i LSI | wc -l)-1))); do
+#CONTROLLER_PCI_NUMBER=$(megacli -AdpGetPciInfo -a$controller | grep "Bus Number" | cut -d: -f2 | sed 's/\ //g')
+#    if ! [[ "$CONTROLLER_PCI_NUMBER" =~ ^[0-9]+$ ]]; then
+#      echo "Error: Controller $controller PCI Number is not correct."
+#      exit
+#    fi
+    
+    DISK_GROUP="$(echo "$DISK_GROUPS" | head -n1)"
+
+    #
+    # compare targets and show megaraid device id:device name:pd type
+    for i in $(megacli -LdPdInfo -a$controller | egrep -o "Target Id: [0-9]*|Device Id: [0-9]*|PD Type:.*" | sed 's/\ //g'); do 
+      [ "$(echo $i | grep ^T)" ] && TARGET="$(echo $i | cut -d: -f2)" 
+      [ "$(echo $i | grep ^D)" ] && echo -n "$(echo $i | cut -d: -f2):" && echo -n "$(echo "$HWDISKINFO" | grep -m 1 -e "$DISK_GROUP:[0-9]:$TARGET:" | cut -d'>' -f2 | sed 's/\n//g')"
+      [ "$(echo $i | grep ^P)" ] && echo ":$(echo $i | cut -d: -f2)"
+    done
+    
+    DISK_GROUPS="$(echo "$DISK_GROUPS" | grep -v $DISK_GROUP 2>/dev/null)"
+
+  done
+}
+
+#
+# return device name (/dev/sdX), serial
+# add "extend to show additional device id
+get_lsi_hdd_serials(){
+  for i in $(get_lsi_hdd_device); do 
+    DEVICE=$(echo $i | cut -d: -f1) 
+    DEVICE_NAME=$(echo $i | cut -d: -f2 | cut -d/ -f3)
+    DEVICE_TYPE=$(echo $i | cut -d: -f3)
+    SERIAL="$(smartctl -d megaraid,$DEVICE -i /dev/$DEVICE_NAME | grep ^Serial | cut -d: -f2 | sed -e 's/^\ *//g;/.*0000.*/ s/\(.*\)0000.*/\1/g;s/^\(MN1020\|MN1120\|MN1270\|MN3220\|MN1240\|MN1220\|MN1221\|MN5220\|PL2331\|PL1331\|PN1131\|PN1138\|PN1338\|PN2331\|PN1134\|PN1181\|PN2134\|PN2138\|PN2338\|PN2361\|PN2161\|PN2181\|PN2186\|PN1331\|PN1334\|PN2334\|JP2940\|JP9960\|WD-\)//g')"
+    [ "$1" == "extend" ] && echo "$DEVICE_NAME:$SERIAL:$DEVICE:$DEVICE_TYPE"
+    [ -z "$1" ] && echo "$DEVICE_NAME:$SERIAL"
+  done
+}
+
+get_ata_hdd_serials() {
+  local JBOD
+  local extend=$1
+  for hdd in $(get_hdd lines | cut -f1 -d:) ; do
+    if [[ $hdd =~ ^nvme.*$ ]]; then 
+      continue 
+    fi
+    JBOD=''
+    serial="$(get_hdd_serial /dev/$hdd $extend | sed -e 's/\(MN1120\|PN1131\|PN1134\|PN1138\|PN1181\|PN1186\|PN2134\|PN2133\|PN2138\|PN2161\|PN2186\|PN2231\)//g')"
+    #
+    # check if adaptec JBOD
+    [ -e "/sys/block/$hdd/device/level" ] && [ "$(cat /sys/block/$hdd/device/level)" == "JBOD" ] && JBOD="true"
+    #
+    # check if Adaptec RAID
+    [ -e "/sys/block/$hdd/device/vendor" ] && [ "$(cat /sys/block/$hdd/device/vendor | sed -e 's/ //g')" == "Adaptec" ] && JBOD="true"
+    #
+    # check if AVAGO RAID
+    [ -e "/sys/block/$hdd/device/vendor" ] && [ "$(cat /sys/block/$hdd/device/vendor | sed -e 's/ //g')" == "AVAGO" ] && JBOD="true"
+    #
+    # check if ASR8405 RAID
+    [ -e "/sys/block/$hdd/device/vendor" ] && [ "$(cat /sys/block/$hdd/device/vendor | sed -e 's/ //g')" == "ASR8405" ] && JBOD="true"
+    #
+    # check if DELL RAID
+    [ -e "/sys/block/$hdd/device/vendor" ] && [ "$(cat /sys/block/$hdd/device/vendor | sed -e 's/ //g')" == "DELL" ] && JBOD="true"
+    [ "$serial" ] && [ -z "$JBOD" ] && echo $hdd:$serial
+  done
+}
+
+get_nvme_hdd_serials() {
+  local serial
+  local hdd
+  local devices="$(nvme list 2>/dev/null | sed -n 's/.*\(nvme[0-9]\+n[0-9]\+\) .*/\1/p')"
+
+  for hdd in $devices; do
+    serial="$(nvme list | grep "$hdd " | awk '{print $2}')"
+    [ -n "$serial" ] && echo "$hdd:$serial"
+  done 
+}
+
+get_all_hdd_serials() {
+  get_ata_hdd_serials
+  get_3ware_hdd_serials
+  get_adaptec_hdd_serials
+  get_lsi_hdd_serials
+  get_nvme_hdd_serials
+}
+
+
+get_all_hdd_types() {
+  ata_hdds="$( get_ata_hdd_serials extend )"
+  threeware_hdds="$( get_3ware_hdd_serials extend )"
+  adaptec_hdds="$( get_adaptec_hdd_serials extend )"
+  lsi_hdds="$( get_lsi_hdd_serials extend )"
+  nvme_hdds="$(get_nvme_hdd_serials)"
+  for hdd in $ata_hdds ; do echo "ata:$hdd" ; done
+  for hdd in $threeware_hdds ; do echo "3ware:$hdd" ; done
+  for hdd in $adaptec_hdds ; do echo "adaptec:$hdd" ; done
+  for hdd in $lsi_hdds ; do echo "lsi:$hdd" ; done
+  for hdd in $nvme_hdds ; do echo "nvme:$hdd" ; done
+}
+
+
+get_hdd_model() {
+  get_hdd_model_ata $1
+  get_hdd_model_lsi $1
+  get_hdd_model_nvme $1
+}
+
+get_hdd_model_ata() {
+  hdd="$1"
+  hdd_info=$(hdparm -I $hdd 2>/dev/null)
+  model_line=$(echo "$hdd_info" | grep Model | tr -s ' ')
+  model=$(echo "$model_line" | cut -d: -f2 | sed 's/^ //g; s/\ $//g;')
+  [ "$model" ] && echo "$model"
+}
+
+get_hdd_model_lsi() {
+  local DEVICE_NAME=$(echo $1 | cut -d: -f2 | cut -d/ -f3)
+  local DEVICE="$(get_lsi_hdd_device | grep $DEVICE_NAME | cut -d: -f1)" 
+  MODEL="$(smartctl -d megaraid,$DEVICE -i /dev/$DEVICE_NAME | sed -ne 's/^\(Device\ Model\|Product\):\ *\(.*\)$/\2/p')"
+  [ "$MODEL" ] && echo "$MODEL"
+}
+
+get_hdd_model_nvme() {
+  if [ "$( echo "$1" | grep nvme)" ]; then
+    nvme list | grep "$1" | cut -c 39-79 | sed -e 's/^[ \t]*//;s/[ \t]*$//'
+  fi
+}
+
+get_hdd_cache() {
+  hdd="$1"
+  hdd_info=$(hdparm -i $hdd 2>/dev/null)
+  cache=$(echo "$hdd_info" | grep BuffSize | cut -d= -f3 | cut -dk -f1)
+  [ "$cache" ] && echo "$cache" || echo "8192"
+}
+
+
+get_hdd_size() {
+  hdd="$1"
+  raw_size=$(get_disks | grep $hdd)
+  if [ "$raw_size" ] ; then
+    if [ -z "$raw_size" ] ; then echo 0 ; return 1 ; fi
+    sizekb=$(echo $raw_size | cut -d: -f2)
+    [ "$2" = "kb" ] && echo "$sizekb" && return
+    if [ "$sizekb" -gt "1048576" ] ; then
+      size_real="$(( $sizekb / 1024 / 1024))GiB"
+      size_fake="$(( $sizekb / 1000 / 1000))GB"
+    else
+      size_real="$(( $sizekb / 1024 ))MiB"
+      size_fake="$(( $sizekb / 1000 ))MB"
+    fi
+    echo "$size_real:$size_fake"
+  else
+    echo "unknown"
+  fi
+}
+
+get_all_nics() {
+  lspci | grep "Ethernet controller"
+}
+
+
+send_robot_test_start() {
+  local ROBOT_TEST_START_URL="$1"
+  if [ -z $ROBOT_TEST_START_URL ]; then
+    echo_red "No URL for reporting test_start to robot...exiting"
+    return 1
+  else
+    local TMP="/tmp/robot_json.tmp"
+    local IP=$(get_ip)
+    local MAC=$(get_mac)
+    local BIOS=$(get_bios_version)
+
+    echo -n "{ \"ip\" : \"$IP\", \"mac\" : \"$MAC\", \"bios\" : \"$BIOS\", \"action\" : \"test_started\", \"hw_data\" : " >> $TMP
+    get_hardware_data_in_json >> $TMP
+    echo -n " }" >> $TMP
+
+    $CURL -X POST -d "JSON=`cat $TMP`" $ROBOT_TEST_START_URL
+    exitcode=$?
+    if [ $exitcode -ne 0 ]; then
+      echo_red "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)"
+    fi
+
+    rm $TMP
+  fi
+}
+
+send_robot_hw_data() {
+  local ACTION="$1"
+  local ROBOT_TEST_START_URL="$2"
+  if [ -z $ROBOT_TEST_START_URL ]; then
+    echo_red "No URL for reporting test_start to robot...exiting"
+    return 1
+  else
+    local TMP="/tmp/robot_json.tmp"
+    local IP=$(get_ip)
+    local MAC=$(get_mac)
+    local BIOS=$(get_bios_version)
+
+    echo -n "{ \"ip\" : \"$IP\", \"mac\" : \"$MAC\", \"bios\" : \"$BIOS\", \"action\" : \"$ACTION\", \"hw_data\" : " >> $TMP
+    get_hardware_data_in_json >> $TMP
+    echo -n " }" >> $TMP
+
+    $CURL -X POST -d "JSON=`cat $TMP`" $ROBOT_TEST_START_URL
+    exitcode=$?
+    if [ $exitcode -ne 0 ]; then
+      echo_red "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)"
+    fi
+
+    rm $TMP
+  fi
+}
+
+send_robot_test_result() {
+  local ROBOT_TEST_RESULT_URL="$1"
+  if [ -z $ROBOT_TEST_RESULT_URL ]; then
+    echo_red "No URL for reporting test_completed to robot...exiting"
+    return 1
+  else
+    if [ ! -e $ROBOT_LOGFILE ]; then
+      echo "" >> $ROBOT_LOGFILE
+    fi
+    local TMP="/tmp/robot_json.tmp"
+    local IP=$(get_ip)
+    local MAC=$(get_mac)
+    local BIOS=$(get_bios_version)
+    local REBUILD_CHECK_MSG=$(grep 'rebuild_check:error' $ROBOT_LOGFILE | cut -d ':' -f 3)
+    local HDD_WIPE_MSG=$(grep 'hdd_wipe:error' $ROBOT_LOGFILE | cut -d ':' -f 4)
+    local HDD_BADBLOCKS_MSG=$(grep 'hdd_badblocks:error' $ROBOT_LOGFILE | cut -d ':' -f 4)
+    local HDD_SMART_MSG=$(grep 'hdd_smart_test:error' $ROBOT_LOGFILE | cut -d ':' -f 2)
+    local STRESSTEST_MSG=$(grep 'stresstest:error' $ROBOT_LOGFILE)
+    local STRESSTEST_TEMP_MSG=$(grep 'stresstest-temperature:error' $ROBOT_LOGFILE)
+    local MEMTEST_MSG=$(grep 'memtest:error' $ROBOT_LOGFILE | cut -d ':' -f 4)
+    local CPU_MSG=$(grep 'cputest:error' $ROBOT_LOGFILE | cut -d ':' -f 4)
+    local NIC_MSG=$(grep 'nictest:error' $ROBOT_LOGFILE | cut -d ':' -f 4)
+    local DMESG_MSG=$(grep 'dmesg:error' $ROBOT_LOGFILE | cut -d ':' -f 4)
+    local RAID_MSG=$(grep 'raid:error' $ROBOT_LOGFILE | cut -d ':' -f 4 | sed ':a;N;$!ba;s/\n/\", \"/g')
+    local KERNEL_COMPILE_MSG=$(grep 'kernel-compile:error' $ROBOT_LOGFILE | cut -d ':' -f 4 | sed ':a;N;$!ba;s/\n/\", \"/g')
+    local BMC_MSG="$(grep 'resetbmc:test_error' $ROBOT_LOGFILE)"
+    local HWCHECK_RESULT="$(grep 'hwcheck_error:true' $ROBOT_LOGFILE)"
+    local FANCHECK_RESULT="$(grep 'fancheck' $ROBOT_LOGFILE | cut -d: -f2)"
+    local SUMMARY="$(grep 'hwc-summary:error' $ROBOT_LOGFILE)"
+
+    echo -n "{ \"ip\" : \"$IP\", \"mac\" : \"$MAC\", \"bios\" : \"$BIOS\", \"action\" : \"test_completed\", \"fancheck\": \"$FANCHECK_RESULT\", \"hw_data\" : " >> $TMP
+    get_hardware_data_in_json >> $TMP
+    echo -n ", " >> $TMP
+    
+    if [ -z "$REBUILD_CHECK_MSG" -a -z "$HDD_WIPE_MSG" -a -z "$HDD_BADBLOCKS_MSG" -a -z "$HDD_SMART_MSG" -a -z "$STRESSTEST_MSG" -a -z "$STRESSTEST_TEMP_MSG" -a -z "$HDD_VALUE_COMPARE_MSG" -a -z "$MEMTEST_MSG" -a -z "$CPU_MSG" -a -z "$NIC_MSG" -a -z "$DMESG_MSG" -a -z "$RAID_MSG" -a -z "$KERNEL_COMPILE_MSG" -a -z "$BMC_MSG" -a -z "$HWCHECK_RESULT" -a -z "$SUMMARY" ]; then
+      echo -n " \"error\" : false }" >> $TMP
+    else
+      echo -n " \"error\" : true" >> $TMP
+      if [ -n "$REBUILD_CHECK_MSG" ]; then
+        echo -n ", \"rebuild_check\" : { \"error\" : true, \"message\" : \"$REBUILD_CHECK_MSG\" }" >> $TMP
+      fi
+      if [ -n "$HDD_WIPE_MSG" ]; then
+        echo -n ", \"hdd_wipe\" : { \"error\" : true, \"message\" : \"$HDD_WIPE_MSG\" }" >> $TMP
+      fi
+      if [ -n "$HDD_BADBLOCKS_MSG" ]; then
+        echo -n ", \"hdd_badblocks\" : { \"error\" : true, \"message\" : \"$HDD_BADBLOCKS_MSG\" }" >> $TMP
+      fi
+      if [ -n "$HDD_SMART_MSG" ]; then
+        echo -n ", \"hdd_smarttest\" : { \"error\" : true, \"message\" : \"$HDD_SMART_MSG\" }" >> $TMP
+      fi
+      if [ -n "$STRESSTEST_MSG" ]; then
+        echo -n ", \"stresstest\" : { \"error\" : true, \"message\" : \"$STRESSTEST_MSG\" }" >> $TMP
+      fi
+      if [ -n "$STRESSTEST_TEMP_MSG" ]; then
+        echo -n ", \"stresstest-temperature\" : { \"error\" : true, \"message\" : \"$STRESSTEST_MSG\" }" >> $TMP
+      fi
+      if [ -n "$MEMTEST_MSG" ]; then
+        echo -n ", \"memtest\" : { \"error\" : true, \"message\" : \"$MEMTEST_MSG\" }" >> $TMP
+      fi
+      if [ -n "$CPU_MSG" ]; then
+        echo -n ", \"cpu\" : { \"error\" : true, \"message\" : \"$CPU_MSG\" }" >> $TMP
+      fi
+      if [ -n "$NIC_MSG" ]; then
+        echo -n ", \"networkcard\" : { \"error\" : true, \"message\" : \"$NIC_MSG\" }" >> $TMP
+      fi
+      if [ -n "$DMESG_MSG" ]; then
+        echo -n ", \"dmesg\" : { \"error\" : true, \"message\" : \"$DMESG_MSG\" }" >> $TMP
+      fi
+      if [ -n "$RAID_MSG" ]; then
+        echo -n ", \"raid\" : { \"error\" : true, \"message\" : [ \"$RAID_MSG\" ] }" >> $TMP
+      fi
+      if [ -n "$KERNEL_COMPILE_MSG" ]; then
+        echo -n ", \"kernel_compile\" : { \"error\" : true, \"message\" : [ \"$KERNEL_COMPILE_MSG\" ] }" >> $TMP
+      fi
+      if [ -n "$BMC_MSG" ]; then
+        echo -n ", \"BMC\" : { \"error\" : true, \"message\" : [ \"$BMC_MSG\" ] }" >> $TMP
+      fi
+      if [ -n "$SUMMARY" ]; then
+        echo -n ", \"SUMMARY\" : { \"error\" : true, \"message\" : [ \"SUMMARY-ERROR\" ] }" >> $TMP
+      fi
+      echo -n " }" >> $TMP
+    fi
+
+    $CURL -X POST -d "JSON=`cat $TMP`" $ROBOT_TEST_RESULT_URL
+    exitcode=$?
+    if [ $exitcode -ne 0 ]; then
+      echo_red "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)"
+    fi
+
+    #rm $TMP
+  fi
+}
+send_robot_test_ram_start() {
+  local ROBOT_TEST_START_URL="$1"
+echo "gestartet" >> /tmp/test
+echo "$1" >> /tmp/test
+echo "$ROBOT_TEST_START_URL" >> /tmp/test
+
+  if [ -z $ROBOT_TEST_START_URL ]; then
+    echo_red "No URL for reporting test_start to robot...exiting"
+    return 1
+  else
+    local TMP="/tmp/robot_json.tmp"
+    local IP=$(get_ip)
+    local MAC=$(get_mac)
+    local BIOS=$(get_bios_version)
+echo "2 gestartet" >> /tmp/test
+
+    echo -n "{ \"ip\" : \"$IP\", \"mac\" : \"$MAC\", \"bios\" : \"$BIOS\", \"action\" : \"ram_test_started\", \"hw_data\" : " >> $TMP
+    get_hardware_data_in_json >> $TMP
+    echo -n " }" >> $TMP
+echo "3 gestartet" >> /tmp/test
+    $CURL -X POST -d "JSON=`cat $TMP`" $ROBOT_TEST_START_URL
+    exitcode=$?
+    if [ $exitcode -ne 0 ]; then
+      echo_red "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)"
+      echo "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)" >> /tmp/test
+    fi
+
+ rm $TMP
+  fi
+}
+
+
+send_robot_test_ram_result() {
+  local ROBOT_TEST_RESULT_URL="$1"
+  if [ -z $ROBOT_TEST_RESULT_URL ]; then
+    echo_red "No URL for reporting test_completed to robot...exiting"
+    return 1
+  else
+    if [ ! -e $ROBOT_LOGFILE ]; then
+      echo "" >> $ROBOT_LOGFILE
+    fi
+    local TMP="/tmp/robot_json_end.tmp"
+    local IP=$(get_ip)
+    local MAC=$(get_mac)
+    local BIOS=$(get_bios_version)
+    local MEMTEST_MSG=$(grep 'memtest:error' $ROBOT_LOGFILE | cut -d ':' -f 4)
+echo "fertig" >> /tmp/test
+    echo -n "{ \"ip\" : \"$IP\", \"mac\" : \"$MAC\", \"bios\" : \"$BIOS\", \"action\" : \"ram_test_completed\", \"hw_data\" : " >> $TMP
+    get_hardware_data_in_json >> $TMP
+    echo -n ", " >> $TMP
+    
+    if [ -z "$MEMTEST_MSG" ]; then
+      echo -n " \"error\" : false }" >> $TMP
+    else
+      echo -n " \"error\" : true" >> $TMP
+      if [ -n "$MEMTEST_MSG" ]; then
+        echo -n ", \"memtest\" : { \"error\" : true, \"message\" : \"$MEMTEST_MSG\" }" >> $TMP
+      fi
+      echo -n " }" >> $TMP
+    fi
+
+    $CURL -X POST -d "JSON=`cat $TMP`" $ROBOT_TEST_RESULT_URL
+    exitcode=$?
+    if [ $exitcode -ne 0 ]; then
+      echo_red "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)"
+      echo "ERROR while sending data: wget or curl returned error  (exitcode=$exitcode)" >> /tmp/test
+   fi
+
+   rm $TMP
+  fi
+}
+
+processor_must_be_replaced() { [[ "$(echo; dmesg -L=never -t)" =~ $'\n'microcode:\ sig=([^,]*), ]] && [[ "${BASH_REMATCH[1]}" == '0x106a4' ]]; }
+
+get_hardware_data_in_json() {
+  local JSON=""
+
+  local MAINBOARD=$(get_mainboard)
+  local CPU_MODEL=$(dmidecode -t processor | grep 'Version' | uniq | cut -d ':' -f 2 | tr -s ' ' | cut -d '@' -f 1 | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+  local CPU_SPEED
+  if [[ "$(get_cpu)" =~ ^.*AMD.*$ ]]; then
+    cpu_speed_raw="$(cat /sys/devices/system/cpu/cpufreq/policy0/cpuinfo_max_freq)"
+    if [ -e "/sys/devices/system/cpu/cpufreq/policy0/cpuinfo_max_freq" ]; then
+      cpu_speed_raw="$(cat /sys/devices/system/cpu/cpufreq/policy0/cpuinfo_max_freq)"
+    else
+      cpu_speed_raw="$(dmidecode -t processor | sed -ne 's/.*[Mm]ax [Ss]peed: \(.*\) MHz/\1/p')"
+      # convert to Hz
+      cpu_speed_raw="$(echo "$cpu_speed_raw*1000" | bc)"
+    fi
+    CPU_SPEED="$(echo "scale=1; $cpu_speed_raw/1000000" | bc -l)"
+  else
+    CPU_SPEED="$(grep 'model name' /proc/cpuinfo | uniq | sed -n 's/.*@\ \(.*\)GHz/\1/p' | sed 's/0$//g')"
+  fi
+
+  local GPU_MODEL=$(get_gpu)
+
+  # fix for multi sockel mainboards
+  # all cores add up
+  local cores
+  local CPU_CORES
+  for cores in $(dmidecode -t processor | grep 'Core Count' | cut -d ':' -f 2 | sed 's/^[ \t]*//g;s/[ \t]*$//g'); do
+    let CPU_CORES=$CPU_CORES+cores
+  done
+  if [ "$CPU_CORES" = "" ]; then
+    CPU_CORES="1"
+  fi
+
+  local CPU_THREAD_COUNT=$(cat /proc/cpuinfo | grep -c "^processor\s*:")
+  if [ -z "$CPU_THREAD_COUNT" ]; then
+    CPU_THREAD_COUNT="$CPU_CORES"
+  fi
+  
+  local HDD_AMOUNT=$(get_all_hdd_serials | wc -l)
+
+
+  local RAM_SIZE=$(get_ram)
+  if [ -n "$(get_hdd)" ]; then
+    local HDD_SIZE=$(get_hdd lines | sed -e 's/^/"/ ; s/:/" : "/ ; s/[GBTB].*$/",/')
+    local HDD_SIZE=$(echo $HDD_SIZE | sed 's/,[ ]["]$//')
+  else
+    local HDD_SIZE=""
+  fi
+  local NIC_AMOUNT=$(get_all_nics | wc -l)
+
+  # check for raid
+  if [ "$(get_raid)" != '' ]; then
+    local RAID="true"
+    local RAID_CONTROLLER="unknown"
+    local RAID_CONTROLLER_MODEL="unknown"
+    if [ "$(get_3ware)" != '' ]; then
+      RAID_CONTROLLER="3ware"
+      RAID_CONTROLLER_MODEL="$(tw_cli show | awk '{ if ($0~/^c.*/) { print $2 } }')"
+    elif [ "$(get_adaptec)" != '' ]; then
+      RAID_CONTROLLER="adaptec"
+      RAID_CONTROLLER_MODEL="$(arcconf list | awk -F "," '{ if ($0~/ +Controller [0-9]+:.*/) {gsub(/ /, "", $4); print $4} }')"
+    elif [ "$(get_lsi)" != '' ]; then
+      RAID_CONTROLLER="LSI"
+      RAID_CONTROLLER_MODEL="$(megacli -AdpAllInfo -aAll | awk -F: '{ if($0~/Product Name.*/) {gsub(/^ /, "", $2); print $2} }')"
+    fi
+  else
+    local RAID="false"
+    local RAID_CONTROLLER=""
+    local RAID_CONTROLLER_MODEL=""
+  fi
+
+  # ipmi extension
+  for ipmi in $(ipmitool mc info 2>/dev/null | grep -Eo "Firmware\ Revision.*|Manufacturer Name.*" | sed -e 's/ //g'); do 
+    if [[ $ipmi =~ FirmwareRevision:(.*) ]]; then 
+      ipmi_firm=${BASH_REMATCH[1]}
+    fi
+    if [[ $ipmi =~ ManufacturerName:(.*) ]]; then 
+      ipmi_manu=${BASH_REMATCH[1]}
+    fi
+  done
+
+  # exception for ASRock Rack B450D4U
+  if [[ "$MAINBOARD" =~ ^B450D4U-V1L ]]; then
+    ipmi_firm=$(/root/.oldroot/nfs/firmware_update/asrock/B450D4U-V1L/checkbmc -g| awk '/BMC version/{print $5}')
+    ipmi_manu="ASRockRack"
+    if [ "$ipmi_firm" == "255.255.255" ]; then
+      ipmi_firm=1.0.0
+    fi
+  fi
+
+  if [ -n "$ipmi_firm" -a -n "$ipmi_manu" ]; then 
+    ipmi_json="{ \"firmware_version\" : \"$ipmi_firm\", \"manufacturer\" : \"$ipmi_manu\" }"
+  else 
+    ipmi_json="{}"
+  fi
+
+  local HDD_TYPE="$(for disk in $(get_hdd lines | cut -d: -f1); do 
+                      echo -n "$disk:"
+                      get_hdd_model /dev/$disk
+                    done | sed -ne 's/^\(.*\):\(.*\)$/"\1" : "\2"/p;' | sed -e ':a;N;$!ba;s/\n/, /g'
+                    )"
+
+
+  local HDD_SECTOR="$(get_hdd_sectors | sed -e 's/^/"/g; s/:/" : "/g; s/$/"/g;' | sed -e ':a;N;$!ba;s/\n/, /g')"
+
+  local wipe_status="$(get_wipe_status)"
+
+  local intel_me_json
+  if [ -f /root/.oldroot/nfs/firmware_update/intel_me/check/check_me_amt.sh ]; then
+    local check_me="$(/root/.oldroot/nfs/firmware_update/intel_me/check/check_me_amt.sh | sed -e 's/ //')"
+    local me_version="$(echo "$check_me" | grep -i version | cut -d: -f2)"
+    local me_amt="$(echo "$check_me" | grep -i amt | cut -d: -f2)"
+
+    if [ -z "$me_amt" ]; then
+      me_amt="\"\""
+    fi
+
+    intel_me_json="{ \"version\" : \"$me_version\", \"amt\" : $me_amt }"
+  fi
+
+  local interface
+  local speed
+  local linkspeed
+
+  for interface in $(find /sys/class/net/ -type l -printf "%f\n"); do
+    [ "$interface" == "lo" ] && continue;
+    speed="$(ethtool $interface | sed -n 's/.*Speed: \(.*\)/\1/p')";
+    linkspeed="\"$interface\": \"$speed\", $linkspeed";
+  done
+
+  local ecc_enabled="$(get_ecc_enabled)"
+
+  # write the JSON
+  echo -n "{ "
+  echo -n "\"mainboard\" : \"$MAINBOARD\", "
+  echo -n "\"cpu_model\" : \"$CPU_MODEL\", "
+  echo -n "\"cpu_speed\" : \"$CPU_SPEED\", "
+  echo -n "\"cpu_cores\" : \"$CPU_CORES\", "
+  echo -n "\"cpu_threads\" : \"$CPU_THREAD_COUNT\", "
+  echo -n "\"ram\" : \"$RAM_SIZE\", "
+  echo -n "\"gpu_model\" : \"$GPU_MODEL\", "
+  echo -n "\"hdd_amount\" : \"$HDD_AMOUNT\", "
+  echo -n "\"hdd_type\" : { $HDD_TYPE },"
+  echo -n "\"hdd_size\" : { $HDD_SIZE }, "
+  echo -n "\"hdd_sector\" : { $HDD_SECTOR }, "
+  echo -n "\"nic_amount\" : \"$NIC_AMOUNT\", "
+  echo -n "\"raid\" : $RAID, "
+  echo -n "\"raid_controller\" : \"$RAID_CONTROLLER\", "
+  echo -n "\"raid_controller_model\" : \"$RAID_CONTROLLER_MODEL\", "
+  echo -n "\"ipmi\" : $ipmi_json, "
+  echo -n "\"wipe_status\" : $wipe_status, "
+  echo -n "\"linkspeed\": { ${linkspeed::-2} }, "
+  echo -n "\"ecc_enabled\" : $ecc_enabled, "
+  echo -n "\"intel_me\" : $intel_me_json "
+  # echo -n "\"processor_must_be_replaced\" : "
+  # if processor_must_be_replaced; then
+  #   echo -n 'true'
+  # else
+  #   echo -n 'false'
+  # fi
+  echo -n "}"
+
+}
+
+get_processor_type() {
+  sed -n '/model name/{s/model\ name.*:\ \(.*\)/\1/;s/  */ /gp;q}' /proc/cpuinfo
+}
+
+get_processor_temp_limit() {
+  local -A processor_values=( [Intel(R) Core(TM) i7 CPU 920 @ 2.67GHz]="88" [Intel(R) Core(TM) i7 CPU 930 @ 2.80GHz]="88" [Intel(R) Core(TM) i7 CPU 950 @ 3.07GHz]="88" [Intel(R) Core(TM) i7 CPU 960 @ 3.20GHz]="88" [Intel(R) Core(TM) i7 CPU 965 @ 3.20GHz]="88" [Intel(R) Core(TM) i7 CPU 975 @ 3.33GHz]="88" )
+  local maxtemp=''
+
+  for proc in "${!processor_values[@]}"; do 
+    if [ "$proc" == "$(get_processor_type)" ]; then 
+      maxtemp=${processor_values[$proc]}
+    fi
+  done
+  if [ -z "$maxtemp" ]; then
+    maxtemp="75"
+  fi
+
+  echo $maxtemp
+}
+
+##
+#
+# deleate logical raid arrays and create raid0/1/5/jbod
+#
+##
+
+# get device data from a specific hdd and raid controller
+get_raid_device() {
+  local raid_type="$1"
+  local disk_serial="$2"
+  local disk
+  
+  if [ "$raid_type" == "lsi" ]; then
+    echo $(megacli -pdlist -aall | awk '{ if (/Enclosure\ Device\ ID:/) { printf $4 ";"; getline; printf $3 } ; if (/Inquiry\ Data:/) { print ":" substr($0,index($0,":")+1) } }' | grep ${disk_serial})
+  elif [ "$raid_type" == "3ware" ]; then
+    IFS=':' read -a disk <<< $(get_all_hdd_types | grep ${disk_serial})
+    echo "${disk[3]}:${disk[2]}"
+  elif [ "$raid_type" == "adaptec" ]; then
+    echo $(arcconf GETCONFIG 1 | awk '{ if (/Reported\ Channel/) { split($4,a,"("); split(a[1],b,","); printf b[1] ";" b[2] } ; if (/Serial\ Number/) { print ":" $4 }}' | grep ${disk_serial})
+  fi
+}
+
+# group all drives based on the size
+group_disks() {
+  local disks_grouped
+  local size
+  local raid_device
+  local raid_line
+  local disk
+  local attr
+  
+  declare -A disks_grouped
+  for disk in $(get_all_hdd_types); do
+    IFS=':' read -a attr <<< $disk
+    if [ "${attr[0]}" != "ata" ]; then
+      raid_line=$(get_raid_device ${attr[0]} ${attr[2]})
+      IFS=':' read -a raid_device <<< $raid_line
+      IFS=':' read -a size <<< $(get_hdd_size ${attr[1]})
+      if [ -z "${disks_grouped[${size[1]}]}" ]; then
+        disks_grouped[${size[1]}]="${size[1]}:${attr[0]}:${raid_device[0]}"
+      else
+        disks_grouped[${size[1]}]="${disks_grouped[${size[1]}]}:${raid_device[0]}"
+      fi
+    fi
+  done
+  for i in "${disks_grouped[@]}"; do
+    echo "$i"
+  done
+}
+
+# creation of a raid level with the given drives
+create_raid_level() {
+  local raid_type="$1"
+  local raid_level="$2"
+  local disks="$3"
+  
+  if [ "$raid_type" == "lsi" ]; then
+    megacli -CfgLdAdd -r${raid_level} [${disks//;/:}] WB RA Direct CachedBadBBU -a0
+    return $?
+  elif [ "$raid_type" == "3ware" ]; then
+    local disk
+    local controller="$(tw_cli show | awk '{ if (/c[0-9]/) { print $1 }}')"
+    disks=${disks//,/:}
+    tw_cli maint createunit ${controller} rraid${raid_level} p${disks//p/}
+    return $?
+  elif [ "$raid_type" == "adaptec" ]; then
+    disks=${disks//;/\ }
+    if [ "$(arcconf GETCONFIG 1 | grep -E "ASR81605|ASR8405")" ]; then
+      while read line; do
+        echo "arcconf TASK START 1 DEVICE $line initialize noprompt"
+        arcconf TASK START 1 DEVICE $line initialize noprompt;
+      done < <(echo "$(echo "$disks" | sed -e 's/,/\n/g')")
+      if [ "$raid_level" = "0" ]; then
+        raid_level="volume"
+      fi
+    elif [ "$(lspci -n | grep -q 9005:028f)" ]; then
+	  MODE_RO="$(arcconf getconfig 1 | grep -i -w "\<Controller Mode\>" | cut -d':' -f2 | sed -e "s/ //g" -e "s/(/_/g" -e "s/)//g")"
+	  case $MODE_RO in
+            HBA)
+              arcconf SETCONTROLLERMODE 1 5
+              ;;
+            RAID_HideRAW)
+              arcconf SETCONTROLLERMODE 1 5
+              ;;
+            Mixed)
+              true
+              ;;
+          esac
+    fi
+    arcconf CREATE 1 LOGICALDRIVE MAX ${raid_level} ${disks//,/\ } noprompt
+    return $?
+  fi
+}
+
+# deletion of the configuration of all raid controllers
+clear_raidcontroller() {
+  lspci | grep LSI
+  if [ "$?" -eq "0" ]; then
+    megacli -CfgLdDel -Lall -aAll
+    megacli -CfgClr -aAll
+    megacli -CfgForeign -Clear -aAll
+    for device in $(megacli -pdlist -aall | awk '/Enclosure Device ID:/ { enc = $4; getline; print enc ":" $3 }'); do
+      megacli -PDMakeGood -PhysDrv[$device] -a0;
+    done
+  fi
+  lspci | grep 3ware
+  if [ "$?" -eq "0" ]; then
+    local controller="$(tw_cli show | awk '{ if (/c[0-9]/) { print $1 }}')"
+    local disk_units="$(tw_cli /${controller} show)"
+    local units="$(echo "$disk_units" | sed -n '/^u/ s/^\(u[0-9]\+\)\ \+.*/\1/p')" 
+    for unit in $units; do
+      tw_cli maint deleteunit ${controller} $unit;
+    done
+  fi
+  lspci | grep Adaptec
+  if [ "$?" -eq "0" ]; then
+    arcconf DELETE 1 LOGICALDRIVE ALL noprompt
+    arcconf DELETE 1 JBOD ALL noprompt
+    # ASR81605 has RAID (Expose RAW) which atomaticaly provide 
+    # not initializes devices as single volume.
+    # set controller into that mode and uninitialize the disks
+    if [ "$(arcconf GETCONFIG 1 | grep -E "ASR81605|ASR8405")" ]; then
+      arcconf SETCONTROLLERMODE 1 0
+      arcconf UNINIT 1 ALL
+    fi
+  fi
+}
+
+# prepare the data for the create_raid_level function
+create_raid() {
+  local grouped_disks=$(group_disks)
+  local total
+  local total_disks
+  local attr
+  local disks
+  
+  clear_raidcontroller
+  
+  for group in $grouped_disks; do
+    IFS=':' read -a attr <<< $group
+    
+    total=${#attr[*]}
+    total_disks=$(( $total - 2 ))
+    
+    if [ "$total_disks" -ge "2" ]; then
+      disks=${attr[2]}
+      for (( i=3  ; i<=$(( $total -1 )); i++ )); do
+        disks="${disks},${attr[$i]}"
+      done
+      
+      if [ "$total_disks" -eq "2" ]; then
+        create_raid_level ${attr[1]} 1 ${disks}
+        if [ "$?" -ne "0" ]; then
+          return $?
+        fi
+      elif [ "$total_disks" -eq "3" ]; then
+        create_raid_level ${attr[1]} 5 ${disks}
+        if [ "$?" -ne "0" ]; then
+          return $?
+        fi
+      else
+        OLDIFS=$IFS
+        IFS=',' 
+        for disk in ${disks}; do
+          IFS=$OLDIFS
+          create_raid_level ${attr[1]} 0 $disk
+        done
+      fi
+    fi
+  done
+  return 0
+}
+
+# creation of raid 0 over all drives which are connected to a raid controller
+create_raid_zero() {
+  echo "$(date): Debug Log - start" >> $LOGDIR/create_raid.log
+
+  # stop software raids to prevent dmesg errors
+  for mddev in $(find /dev/ -name md[0-9]*); do 
+    mdadm --stop $mddev; 
+  done
+
+  clear_raidcontroller
+  echo "$(date): Debug Log - clear raid finished" >> $LOGDIR/create_raid.log
+  
+  lspci | grep LSI
+  if [ "$?" -eq "0" ]; then
+    for device in $(megacli -pdlist -aall | awk '/Enclosure Device ID:/ { enc = $4; getline; print enc ":" $3 }'); do
+      megacli -CfgLdAdd -r0 [$device] WB RA Direct -a0;
+    done
+  fi
+  lspci | grep 3ware
+  if [ "$?" -eq "0" ]; then
+    local controller="$(tw_cli show | awk '{ if (/c[0-9]/) { print $1 }}')"
+    local disk_units="$(tw_cli /${controller} show)"
+    local disks="$(echo "$disk_units" | sed -n '/^p/ s/^\(p[0-9]\+\)\ \+.*/\1/p')" 
+    for disk in $disks; do
+      tw_cli maint createunit ${controller} rsingle $disk;
+    done
+  fi
+  lspci | grep Adaptec
+  if [ "$?" -eq "0" ]; then
+    if [ "$(arcconf GETCONFIG 1 | grep -E "ASR81605|ASR8405")" ]; then
+      arcconf SETCONTROLLERMODE 1 0
+    elif [ "$(lspci -n | grep -q 9005:028f)" ]; then
+      arcconf SETCONTROLLERMODE 1 2 >/dev/null                   #changing mode to HBA mode;
+      sleep 12
+    else 
+      for device in "$(arcconf GETCONFIG 1 | sed -n '/Reported\ Channel/ s/.*:\ \(.*\),\(.*\)(.*/\1 \2/p')"; do
+        arcconf CREATE 1 JBOD $device noprompt;
+      done
+    fi
+  fi
+  echo "$(date): Debug Log - create raid finished" >> $LOGDIR/create_raid.log
+  if [ "$(get_raid)" ]; then
+    $PWD/report.sh
+  fi
+  echo "$(date): Debug Log - report finished" >> $LOGDIR/create_raid.log
+  sleep 10
+
+  # Sometimes we get dmesg erros during the raid creation. To prevent this we
+  # save bootup dmesg and clear the old entries to get a clean dmesg before test
+  dmesg 2>&1 > $LOGDIR/dmesg_bootup.log
+  dmesg -c 2>&1 > /dev/null
+
+}
+
+##
+ #
+ # end raid configuration
+ #
+##
+
+get_device_type() {
+  local disk_info
+  local disks
+  local type
+  local jbod
+  local serial
+  local hdparm
+  local smart
+  local sg_dev
+  local twa_dev
+
+  local all_hdd_types="$(get_all_hdd_types)"
+
+  for disk in $(get_disks | cut -d: -f1 | cut -d/ -f3); do 
+    disks="$(echo "$all_hdd_types" | grep $disk)"
+    for disk_info in $(echo "$disks"); do
+      type="$(echo $disk_info | cut -d: -f1)"
+      jbod="$(echo $disk_info | cut -d: -f4)"
+      serial="$(echo $disk_info | cut -d: -f3)"
+
+      echo -n "$serial:"
+      if [ "$type" == "lsi" ]; then
+        if [ $(megacli -pdlist -aall | awk '{ if (/Inquiry\ Data:/) { printf $3 } ; if (/Media\ Type:\ Solid\ State\ Device/) { print ":ssd" }}' | grep -E "${serial}(OCZ-VERTEX3)?:ssd") ]; then
+          echo "ssd"
+        else
+          echo "hdd"
+        fi            
+      elif  [ "$type" == "adaptec" ]; then 
+        if [ "$jbod" == "JBOD" ]; then 
+          if [ "$(hdparm -I /dev/$disk | awk '{ if (/Nominal\ Media\ Rotation\ Rate:\ Solid\ State\ Device/) { print "ssd" }}')" == "ssd" ]; then
+            echo "ssd"
+          else
+            echo "hdd"
+          fi
+        else
+          for sg_dev in $(find /dev -name sg*); do 
+            hdparm="$(hdparm -I $sg_dev 2> /dev/null)"
+            if [ "$(echo "$hdparm" | grep "$serial")" ]; then 
+              if [ "$(echo "$hdparm" | awk '{ if (/Nominal\ Media\ Rotation\ Rate:\ Solid\ State\ Device/) { print "ssd" }}')" == "ssd" ]; then
+                echo "ssd"
+              else 
+                echo "hdd"
+              fi
+              break
+            fi 
+          done
+        fi
+      elif [ "$type" == "3ware" ]; then
+        for twa_dev in $(find /dev -name twa*); do
+          smart="$(smartctl -i -d 3ware,${jbod//p/} $twa_dev)"
+          if [ "$(echo "$smart" | grep $serial)" ]; then 
+            if [ "$(echo $smart | awk '{ if (/Rotation\ Rate:.*Solid\ State\ Device/) { print "ssd" }}')" == "ssd" ]; then
+              echo "ssd"
+            else 
+              echo "hdd"
+            fi
+            break
+          fi
+        done
+      elif  [ "$type" == "ata" ]; then 
+        if [ "$(cat /sys/block/$disk/queue/rotational)" == "0" ]; then 
+          echo "ssd"
+        else 
+          echo "hdd"
+        fi 
+      fi
+    done
+  done
+}
+
+
+is_wiped () {
+  declare -A ERRORMSG
+  if [ -b $1 ]; then
+    local disk="$1"
+  else
+    return 1
+  fi
+
+  #Check Wipe
+  #Get sector count
+  sectors=$(hdparm -g $disk | grep sector | tr "," "\n" | grep sectors | cut -d' ' -f4)
+
+  #Calculate the middle and the last 512 Bytes
+    first="0"
+    middle="$(echo "$sectors/2" | bc -l | cut -d'.' -f1)"
+    last="$(echo "$sectors-10240" | bc -l)"
+  #Read 5M for each
+  for skip in $first $middle $last; do 
+    local tempfile="$(mktemp)"
+    dd if=$disk bs=512 count=10240 of=$tempfile skip=$skip 2>/dev/null
+    if [ -e $tempfile ]; then
+      for pattern_file in $(find /root/.oldroot/nfs/check/data/ -name hddwipe_checkfile_5m_*); do
+        local pattern="$(echo $pattern_file | sed -n 's/.*_\(.*\)/\1/p')"
+        if [ -n "$(diff $tempfile $pattern_file)" ]; then
+          ERRORMSG[$pattern]="${ERRORMSG[$pattern]}$pattern-Sektor-$skip-Check: ERROR, " 
+        fi
+      done
+    else
+      ERRORMSG[$pattern]="${ERRORMSG[$pattern]}File Error Sektor-$skip-Check, "
+    fi
+    rm $tempfile 
+  done
+  if [ "${#ERRORMSG[@]}" -gt 1 ]; then
+    echo false
+  else
+    echo true
+  fi
+}
+
+get_wipe_status() {
+  local status="true"
+  for disk in $(get_disks | cut -d: -f1); do
+    if [ "$(is_wiped $disk)" == "false" ]; then
+      status="false"
+    fi
+  done
+  echo $status
+}
+
+to_utf8() { 
+  declare INPUT=${@:-$(</dev/stdin)}
+  echo "$INPUT" | iconv -f utf-8 -t utf-8 -c
+}

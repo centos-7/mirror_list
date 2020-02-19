@@ -1,0 +1,11 @@
+
+this directory contains the
+test data (testfile & it's md5sum, kernel source)
+for the hardware check scripts
+
+use ../mktestfiles.sh to generate a big testfile
+and wget ftp://ftp.de.kernel.org/pub/linux/kernel/v2.6/linux-2.6.XX.X.tar.bz2
+to get the kernel source
+
+use mkhddwipedata to create patterns for hddwipe
+

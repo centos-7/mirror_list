@@ -1,0 +1,18 @@
+HWCheck-Scripts=~/work/hwcheck-scripts/ CD=~/work/hwcheck-scripts/ filter="*" {
+ 3waretest.sh
+ beep.sh
+ config
+ cputest.sh
+ hddtest.sh
+ kernel-compile.sh
+ memtest.sh
+ menu.sh
+ mktestfiles.sh
+ nictest.sh
+ periodic_livesign.sh
+ remove_partitions.sh
+ remove_status.sh
+ reset_status.sh
+ short_test.sh
+ show_info.sh
+}

@@ -1,0 +1,391 @@
+#!/bin/bash
+
+#
+# prepare secure erase
+
+. $PWD/config
+. $PWD/wipe.function
+. $PWD/report.function
+
+function suspend_server {
+  if [ -z "$(get_raid)" ]; then
+    rtcwake -u -s 30 -m mem
+  fi
+}
+
+##
+# declare readonly user an password vars for secure erase
+##
+declare -r sec_user="u"
+declare -r sec_pass="abcd"
+
+##
+# check if disk ist locked or not
+# arguments $1 = "sda"
+# return true is disk is locked
+##
+function is_locked {
+  local disk="$1"
+
+  [ "$(hdparm -I /dev/$disk | sed -n 's/\t\(.*\)\tenabled/\1/p')" = "not" ] && echo "false" || echo "true"
+}
+
+##
+# unlock hdd
+# arguments $1 = "sda"
+##
+function secure_unlock_hdd {
+  local dev="/dev/$1"
+
+  local pass_seagate="abcd SeaChest p"
+  local pass_wd="abcd WDCWDCWDCWDCWDCWDCWDCWDCWDCWDCW p"
+  local pass_micron="abcd NULL p"
+  local pass_default="abcd p"
+
+  case $(get_manufacturer get_hdd_serial $disk) in
+    Seagate)
+      try_pass=$pass_seagate
+      ;;
+    HGST|"Western Digital")
+      try_pass=$pass_wd
+      ;;
+    Micron|Crucial)
+      try_pass=$pass_micron
+      ;;
+    *)
+      try_pass=$pass_default
+      ;;
+  esac
+  for pass in $try_pass; do
+    if [ "$(hdparm -I $dev|grep "Security:" -A10|grep enabled|sed 's/\t//g')" == "enabled" ]; then
+      if [ "$(hdparm -I $dev|grep "Security:" -A10|grep locked|sed 's/\t//g')" == "locked" ]; then
+        echo  "trying to unlock $dev $serial with password \"$pass\""
+        if [[ "$pass" == "WDCWDCWDCWDCWDCWDCWDCWDCWDCWDCW" ]]; then
+          hdparm --user-master m --security-unlock "$pass" $dev 2>&1 > /dev/null
+        else
+          hdparm --user-master u --security-unlock "$pass" $dev 2>&1 > /dev/null
+        fi
+      fi
+      if [[ "$(hdparm -I $dev|grep "Security:" -A10|grep locked|sed 's/\t//g')" == "notlocked" && "$(hdparm -I $dev|grep "Security:" -A10|grep enabled|sed 's/\t//g')" == "enabled" ]]; then
+        echo "trying to disable security on $dev $serial with password \"$pass\""
+        if [[ "$pass" == "WDCWDCWDCWDCWDCWDCWDCWDCWDCWDCW" ]]; then
+          hdparm --user-master m --security-disable "$pass" $dev 2>&1 > /dev/null
+        else
+          hdparm --user-master u --security-disable "$pass" $dev 2>&1 > /dev/null
+        fi
+      fi
+    fi
+  done
+  if [[ "$(hdparm -I $dev|grep "Security:" -A10|grep locked|sed 's/\t//g')" == "locked" || "$(hdparm -I $dev|grep "Security:" -A10|grep enabled|sed 's/\t//g')" == "enabled" ]]; then
+    echo -e "\e[31mdisk $dev $serial still locked\e[0m"
+  else
+    echo -e "\e[32mdisk $dev $serial is unlocked\e[0m"
+  fi
+}
+
+##
+# check if disk ist frozen
+# arguments $1 = "sda"
+# return true if disk ist not frozen
+##
+function is_frozen {
+  local disk="$1"
+  local secure_status=true
+
+  if $(is_locked $disk); then 
+    secure_unlock_hdd $disk
+  fi
+  #
+  # check if hdd is frozen or not
+  frozen="$(hdparm -I /dev/$disk | awk '/.*frozen.*/ {if($1 != "not") { gsub(/(\ |\t)+/,""); print $0 } else { print "not" } }')"
+  if [ "$frozen" = "not" ]; then 
+    secure_status="false";
+  fi
+
+  echo $secure_status
+}
+
+##
+# check if secure erase is possible
+# return true if secure erase is possible
+##
+function get_secure_status {
+  local disks
+  local disk_a
+  local frozen
+  local secure=true
+
+  # if raid controller is build in return false 
+  # because can't perform sec-erase
+  [ "$(get_raid)" ] && echo false && return 
+
+  for disks in $(get_all_hdd_types); do
+    disk_a=(${disks//:/ })
+    if [ "${disk_a[0]}" = "ata" ]; then
+      if $(is_frozen ${disk_a[1]}); then
+        secure=false
+      fi
+    fi
+  done
+
+  if [ "$(get_raid)" ]; then
+    secure_status="false"
+  fi
+
+  echo $secure
+}
+
+
+function write_pattern {
+  local disk="$1"
+  local sectors=$(hdparm -g /dev/$disk | sed -e 's/ *//g; s/,/\n/g; s/=/ /g' | awk '/sectors/ { print $2 }')
+
+  write_pattern_to_disk $disk 0
+  write_pattern_to_disk $disk $[(sectors/2)]
+  write_pattern_to_disk $disk $[sectors-102400]
+}
+
+function write_pattern_to_disk {
+  local disk="$1"
+  local seek="$2"
+  local patternfile="$PWD/data/hddwipe.ssd"
+  local i=0
+  until [ $i -ge 50 ]; do
+    i=$[$i+1]
+    cat $patternfile
+  done | pv -brtpe -s50M -i1 -N"/dev/$disk" | dd of=/dev/$disk bs=512 seek=$seek conv=fdatasync 2>/dev/null
+}
+
+function start_secure_erase {
+  local disk=$1
+  local serial=$2
+  local pass="abcd"
+  local user="u"
+
+  hdparm --user-master $sec_user --security-set-pass $sec_pass /dev/$disk > /dev/null
+  (time hdparm --user-master $sec_user --security-erase $sec_pass /dev/$disk > /tmp/secure_erase-$serial.log; echo finished >> /tmp/secure_erase-$serial.log)&
+#  LOGDIR="/tmp"
+#  LOGFILE="secure_erase-$serial.log"
+}
+
+function check_secure_erase_state {
+  local still_running=true
+  local serial=$1
+  local logfile="/tmp/secure_erase-${serial}.log"
+  while $still_running; do
+    if [ "$(grep "finished" $logfile)" ]; then
+      echo_green "Secure Erase finished for $serial"
+      still_running=false
+    else
+      echo_yellow "Secure Erase for $serial is still running."
+      echo_yellow "...Wait 5 minutes..."
+      sleep 300
+    fi
+ done
+}
+
+function check_pattern {
+  local disk="$1"
+  local serial="$2"
+  local mode="$3"
+  local send_result="$4"
+  local wipe_result="OK"
+  local sectors=$(hdparm -g /dev/$disk | sed -e 's/ *//g; s/,/\n/g; s/=/ /g' | awk '/sectors/ { print $2 }')
+
+  echo -ne "\t\033[01;33mFirst: \033[00m"; 
+  if [ "$(check_hdd_pattern $disk 0)" == "$mode" ]; then 
+    echo_green "\tOK"; 
+  else 
+    echo_red "\tERROR"; 
+    wipe_result="ERROR"; 
+  fi
+  echo -ne "\t\033[01;33mMiddle: \033[00m"; 
+  if [ "$(check_hdd_pattern $disk $[(sectors/2)])" == "$mode" ]; then 
+    echo_green "OK"; 
+  else 
+    echo_red "ERROR"; 
+    wipe_result="ERROR"; 
+  fi
+  echo -ne "\t\033[01;33mEnd: \033[00m"; 
+  if [ "$(check_hdd_pattern $disk $[sectors-102400])" == "$mode" ]; then 
+    echo_green "\tOK"; 
+  else 
+    echo_red "\tERROR"; 
+    wipe_result="ERROR"; 
+  fi
+
+  echo "$wipe_result" >> $LOGDIR/SECWIPE_RESULT-$serial.log
+
+  if [ "$send_result" == "true" ]; then
+    if [ "$(cat $LOGDIR/SECWIPE_RESULT-$serial.log | grep ERROR)" ]; then
+      wipe_result="ERROR"
+    else
+      wipe_result="OK"
+    fi
+      echo_red "SEND_RESULT"
+
+      send2 test_log_json "$SUBTEST_ID" "{\"WIPE_CHECK\":\"$wipe_result\"}" > /dev/null
+      send2 update_message "$SUBTEST_ID" "finished" > /dev/null
+  else
+    if [ "$wipe_result" == "ERROR" ]; then
+      echo_red "ERROR - PATTER NOT WRITTEN"
+      send2 test_log_json "$SUBTEST_ID" "{\"WIPE_CHECK\":\"$wipe_result\"}" > /dev/null
+    fi
+  fi
+
+}
+
+function check_hdd_pattern {
+  local disk=$1
+  local skip=$2
+  local i=0
+  local result
+
+  result="$(diff -q <(until [ $i -ge $[(1024/8)*1024*50] ]; do i=$[$i+1]; echo -en 'HETZNER!'; done) <(dd if=/dev/$disk bs=512 count=102400 skip=$skip 2>/dev/null))"
+  if [ -z "$result" ]; then
+    echo true
+  else
+    echo false
+  fi
+}
+
+function check_smart_values {
+  local disk=$1
+
+  local TEMPFILE="$(mktemp)"
+  smartctl -A /dev/$disk > $TEMPFILE
+
+  # send smart values
+  send2 test_log_raw "$SUBTEST_ID" "smart_log_ssd_wipe" "$TEMPFILE" > /dev/null
+
+}
+
+function disable_hpa {
+  local disk=$1
+
+  local output
+  local sectors
+
+  output="$(hdparm -N /dev/$disk)"
+
+  if [ -n "$(echo "$output" | grep enabled)" ]; then
+    sectors=$(echo "$output" | sed -n 's/.*\/\([0-9]\+\).*/\1/p')
+    output="$(hdparm -Np$sectors /dev/$disk)"
+  fi
+}
+
+#---------------------------------------------------------------------------#
+
+function main {
+
+  if [ -z "$(get_all_hdd_serials)" ]; then 
+    exit
+  fi
+
+  screenrc="/tmp/screenrc-$(basename $0)-$$"
+  cat <<EOF >$screenrc
+## zombie on
+caption always "%{WB}%?%-Lw%?%{kw}%n*%f %t%?(%u)%?%{WB}%?%+Lw%?%{Wb}"
+hardstatus alwayslastline "%{= RY}%H %{BW} %l %{bW} %c %M %d%="
+
+EOF
+
+
+  local disk
+  local disk_a
+  for disk in $(get_all_hdd_serials); do
+    disk_a=(${disk//:/ })
+
+    echo "screen -t $disk bash -c 'bash $PWD/hddwipe_ssd_eraser.sh ${disk_a[0]} ${disk_a[1]} | tee $LOGDIR/hddwipe-${disk_a[1]}.log; sleep 2;'" >> $screenrc
+    #echo "screen -t $disk bash" >> $screenrc
+  done
+
+  #
+  # start screen
+  screen -mS $(basename $0) -c $screenrc
+}
+
+function wipe {
+  local disk=$1
+  local serial=$2
+  local size=$(get_hdd_size $disk)
+  local sizeKB=$(get_hdd_size $disk kb)
+  local cache=$(get_hdd_cache $disk)
+  local cacheMB="$[$cache/1024]M"
+  local model=$(get_hdd_model $disk)
+  local model_text="$model (${cache}K)"
+  local mac="$(get_mac)"
+
+  echo "HDDWIPE-SSD - SECURE ERASE" | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  echo "$(date)" | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  echo -e "Disk: /dev/$disk $serial\n\n" | tee -a $LOGDIR/hddwipe_sec_$serial.log
+
+  echo "DISABLE HPA" | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  disable_hpa $disk | tee -a $LOGDIR/hddwipe_sec_$serial.log
+
+  send2 info "$serial" "HDD" > /dev/null
+  HDDWIPE_ID="$(send2 test "$serial" "SECWIPE" "working" "preparing")"
+  if [ -d "/run/hdd_test_status" ]; then
+    file=$(grep -ril $disk /run/hdd_test_status/running/)
+
+    echo $HDDWIPE_ID >> $file
+
+    # debug code
+    echo "disk: $disk, file: $file, ID: $HDDWIPE_ID" >> $LOGDIR/hwb_plugnplay_wipe_debug
+
+  fi
+
+  #
+  # send wipe mode (dd or secure erase)
+  send2 test_log_json "$HDDWIPE_ID" "{\"__WIPE\":\"SECURE_ERASE\"}" > /dev/null
+
+  #
+  # send hdparm info
+  hdparm -I /dev/$disk > $LOGDIR/hddwipe_sec_hdparm_info_$serial.log
+  send2 test_log_raw "$HDDWIPE_ID" "__HDPARM-INFO" $LOGDIR/hddwipe_sec_hdparm_info_$serial.log
+
+  SUBTEST_ID="$(send2 subtest "$HDDWIPE_ID" "WIPE-CHECK" "working" "starting")"
+
+  echo_green "Write pattern to disk: $disk" | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  write_pattern $disk | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  echo_green "Check written pattern: $disk" | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  check_pattern $disk $serial true false | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  echo_green "Start Secure Erase" | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  if [ "$(echo $disk | grep nvme)" ]; then
+    local namespace=${disk##*n}
+    local nvme_dev=${disk%n*}
+
+    echo_grey "  nvme format /dev/$nvme_dev --namespace-id=$namespace --ses=1" | tee -a $LOGDIR/hddwipe_sec_$serial.log
+    nvme format /dev/$nvme_dev --namespace-id=$namespace --ses=1 2>&1 | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  else
+    start_secure_erase $disk $serial | tee -a $LOGDIR/hddwipe_sec_$serial.log
+    sleep 10;
+    check_secure_erase_state $serial | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  fi
+  send2 test_log_json "$HDDWIPE_ID" "{\"__LOCKED-AFTER-WIPE\":\"$(is_locked $disk)\"}" > /dev/null
+  if $(is_locked $disk); then 
+    secure_unlock_hdd $disk
+  fi
+  send2 test_log_json "$HDDWIPE_ID" "{\"__LOCKED-AFTER-UNLOCK\":\"$(is_locked $disk)\"}" > /dev/null
+
+  echo_green "Check pattern: $disk" | tee -a $LOGDIR/hddwipe_sec_$serial.log
+  check_pattern $disk $serial false true | tee -a $LOGDIR/hddwipe_sec_$serial.log
+
+  check_smart_values $disk | tee -a $LOGDIR/hddwipe_sec_$serial.log
+ 
+  sed -i -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]//g" $LOGDIR/hddwipe_sec_$serial.log
+  
+  send2 test_log_raw "$SUBTEST_ID" "__SEC-LOG" $LOGDIR/hddwipe_sec_$serial.log
+  send2 finished "$SUBTEST_ID" > /dev/null
+
+  rm $SUBTEST_ID_FILE
+
+  local RESULT="$(send2 finished "$HDDWIPE_ID")"
+
+  if [ "$(echo "$RESULT" | grep -i error)" ]; then
+    echo "hdd_wipe:error:$disk:$disk End Wipe FAILED" >> $ROBOT_LOGFILE
+  fi
+
+  rm /tmp/secure_erase-$serial.log
+  rm $LOGDIR/SECWIPE_RESULT-$serial.log
+}

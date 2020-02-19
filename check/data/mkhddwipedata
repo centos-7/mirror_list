@@ -1,0 +1,34 @@
+#!/bin/bash
+
+#
+# generate data needed for hddwipe_eraser.sh
+#
+
+
+
+function create_pattern_file() {
+  p=$1 ; f=$2 ; i=0
+  echo "create pattern $p  in file $f ..."
+  pattern1k=$(
+    until [ $i -ge $[1024/8] ] ; do
+      i=$[$i+1]
+      echo -en "$p$p$p$p$p$p$p$p"
+    done
+  )
+  : > $f
+  for i in $(seq 1 1024) ; do
+    echo -n $pattern1k >> $f
+  done
+}
+
+
+echo 'create pattern \0000  in file 00000000.hddwipe ...'
+dd if=/dev/urandom of=hddwipe.00000000 bs=1M count=1 >/dev/null 2>&1
+
+create_pattern_file '\0125' hddwipe.01010101  # 0x55
+create_pattern_file '\0252' hddwipe.10101010  # 0xAA
+create_pattern_file '\0377' hddwipe.11111111  # 0xFF
+
+echo "create random pattern in file random ..."
+dd if=/dev/urandom of=hddwipe.random bs=1M count=1 >/dev/null 2>&1
+

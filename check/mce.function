@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+# MCE report functions
+
+# Raw EDAC JSON
+read_edac_mc() {
+  printf '{'
+  for f in /sys/devices/system/edac/mc/mc[0-9]*/csrow[0-9]*/{[cu]e_count,ch[0-9]*_[cu]e_count}; do
+    [[ -f "$f" ]] || continue
+    printf '"%s":%d,' "${f#/sys/devices/system/edac/mc/}" "$(cat "$f")"
+  done
+  for f in /sys/devices/system/edac/mc/mc[0-9]*/{[cu]e_noinfo_count,seconds_since_reset}; do
+    [[ -f "$f" ]] || continue
+    printf '"%s":%d,' "${f#/sys/devices/system/edac/mc/}" "$(cat "$f")"
+  done
+  for f in /sys/class/dmi/id/{board_name,board_vendor}; do
+    [[ -f "$f" ]] || continue
+    printf '"%s":"%s",' "${f#/sys/class/dmi/id/}" "$(cat "$f")"
+  done | sed 's/.$//'
+  printf '}'
+}
+
+reset_edac_mc_counters() {
+  for f in /sys/devices/system/edac/mc/mc[0-9]*/reset_counters; do
+    [[ -f "$f" ]] && echo 1 > "$f"
+  done
+}

@@ -1,0 +1,297 @@
+#!/bin/bash
+
+. /root/.oldroot/nfs/check/config
+source /root/.oldroot/nfs/check/new_rzadmin_report.functions
+
+RLOGFILE="hardware-check.report"
+
+urlencode() {
+  local LANG=C
+  for ((i=0;i<${#1};i++)); do
+    if [[ ${1:$i:1} =~ ^[a-zA-Z0-9\.\~\_\-]$ ]]; then
+      printf "${1:$i:1}"
+    else
+      printf '%%%02X' "'${1:$i:1}"
+    fi
+  done
+}
+
+pretreat_attr_item_value() {
+  local hardware_item="$1"
+  local item_value="$2"
+  if [[ "$hardware_item" == 'BIOS_Version' ]] ||
+    [[ "$hardware_item" == 'Product' ]] ||
+    [[ "$hardware_item" == 'Product Name' ]] ||
+    [[ "$hardware_item" == 'ProductName' ]] ||
+    [[ "$hardware_item" == 'Version' ]]; then
+    item_value="$(echo "$item_value" | sed 's/^[ \t]*//;s/[ \t]*$//')"
+  fi
+  if [[ "$hardware_item" == 'Serial' ]] ||
+    [[ "$hardware_item" == 'Serial Number' ]] ||
+    [[ "$hardware_item" == 'SerialNumber' ]]; then
+    if [[ "$item_value" == "''" ]] ||
+      [[ "$item_value" == '0123456789' ]] ||
+      [[ "$item_value" == 'MB-1234567890' ]] ||
+      [[ "$item_value" == 'Not Specified' ]] ||
+      [[ "$item_value" == 'To be filled by O.E.M.' ]]; then
+      return
+    fi
+  fi
+  echo "$item_value"
+}
+
+pretreat_cattr_item_value() {
+  local computer_item="$1"
+  local item_value="$2"
+  [[ "$computer_item" == 'CPU' ]] && item_value="$(echo "$item_value" | awk '{$1=$1}1')"
+  echo "$item_value"
+}
+
+send2() {
+  local api_uri="https://$SERVER_DATACENTER/api/v1/hardwarecheck"
+  local temp="$(mktemp)"
+  local header_temp="$(mktemp)"
+  local curl_command="curl -k -o '$temp' -s -w '%{http_code}' -D '$header_temp' -H 'Hwc-Version: $VERSION'"
+  local command="$curl_command "
+  local ip="$(get_ip)"
+  local mac="$(get_mac)"
+
+  mac="$(urlencode "$mac")"
+
+  case "$1" in
+    reset)
+      command+="-X PUT '$api_uri/computer/$mac' "
+      command+="-d 'ip=$ip' "
+      command+="-d 'necessary=$2'"
+    ;;
+    update)
+      command+="-X PATCH '$api_uri/computer/$mac' "
+      command+="-d 'ip=$ip'"
+    ;;
+    summary) command+="-X POST '$api_uri/computer/$mac/summary'";;
+    get_summary) command+="'$api_uri/computer/$mac/summary'";;
+    info)
+      local serialnumber="$2"
+      local hardware_type="$3"
+      local additional_identifier="$4"
+      [ -z "$serialnumber" ] && return
+      [ -z "$hardware_type" ] && return
+      command+="-X POST '$api_uri/computer/$mac/hardware' "
+      command+="-d 'serialnumber=$serialnumber' "
+      command+="-d 'hardware_type=$hardware_type' "
+      command+="-d 'new_rzadmin_hardware_type=$(new_rzadmin_hardware_type "$serialnumber")'"
+      [[ -n "$additional_identifier" ]] && command+=" -d 'additional_identifier=$additional_identifier'"
+    ;;
+    attr)
+      local serialnumber="$(urlencode "$2")"
+      local hardware_item="$3"
+      local item_value="$(sed -e 's/[[:space:]]*$//' <<<${4})"
+      local additional_identifier="$5"
+      [ -z "$serialnumber" ] && return
+      item_value="$(pretreat_attr_item_value "$hardware_item" "$item_value")"
+      [ -z "$item_value" ] && return
+      command+="-X POST '$api_uri/computer/$mac/hardware/$serialnumber/attributes' "
+      command+="-d 'hardware_item=$hardware_item' "
+      command+="-d 'item_value=$item_value' "
+      # $serialnumber is urlencoded, pass $2
+      command+="-d 'new_rzadmin_hardware_type=$(new_rzadmin_hardware_type "$2")'"
+      [[ -n "$additional_identifier" ]] && command+=" -d 'additional_identifier=$additional_identifier'"
+    ;;
+    test)
+      local serialnumber="$(urlencode "$2")"
+      local hardware_test_type="$3"
+      local hardware_test_state="$4"
+      local message="$5"
+      [ -z "$serialnumber" ] && return
+      [ -z "$hardware_test_type" ] && return
+      [ -z "$hardware_test_state" ] && return
+      [ -z "$message" ] && return
+      command+="-X POST '$api_uri/computer/$mac/hardware/$serialnumber/hardware_tests' "
+      command+="-d 'hardware_test_state=$hardware_test_state' "
+      command+="-d 'hardware_test_type=$hardware_test_type' "
+      command+="-d 'message=$message' "
+      # $serialnumber is urlencoded, pass $2
+      command+="-d 'new_rzadmin_hardware_type=$(new_rzadmin_hardware_type "$2")'"
+    ;;
+    cputemp|dmesg|stresstest|hdd-compare|mce-check)
+      local hardware_test_type="${1^^}"
+      local hardware_test_state="$2"
+      local message="$3"
+      [ -z "$hardware_test_type" ] && return
+      [ -z "$hardware_test_state" ] && return
+      [ -z "$message" ] && return
+      command+="-X POST '$api_uri/computer/$mac/hardware_tests' "
+      command+="-d 'hardware_test_state=$hardware_test_state' "
+      command+="-d 'hardware_test_type=$hardware_test_type' "
+      command+="-d 'message=$message'"
+    ;;
+    bmc|partition-backup|reset-bmc)
+      local hardware_test_state='finished'
+      local hardware_test_type="${1^^}"
+      [ -z "$hardware_test_type" ] && return
+      [ -z "$hardware_test_state" ] && return
+      [[ "$hardware_test_type" == 'BMC' ]] && hardware_test_type='RESET-BMC'
+      command+="-X POST '$api_uri/computer/$mac/hardware_tests' "
+      command+="-d 'hardware_test_state=$hardware_test_state' "
+      command+="-d 'hardware_test_type=$hardware_test_type'"
+    ;;
+    shorttest)
+      local result="$2"
+      [ -z "$result" ] && return
+      command+="-X POST '$api_uri/computer/$mac/shorttest' "
+      command+="-d 'result=$result'"
+    ;;
+    subtest)
+      local hardware_test_id="$(urlencode "$2")"
+      local hardware_test_type="$3"
+      local hardware_test_state="$4"
+      local message="$5"
+      [ -z "$hardware_test_id" ] && return
+      [ -z "$hardware_test_type" ] && return
+      [ -z "$hardware_test_state" ] && return
+      [ -z "$message" ] && return
+      command+="-X POST '$api_uri/computer/$mac/hardware_tests/$hardware_test_id/hardware_tests' "
+      command+="-d 'hardware_test_state=$hardware_test_state' "
+      command+="-d 'hardware_test_type=$hardware_test_type' "
+      command+="-d 'message=$message'"
+    ;;
+    test_log_json)
+      local hardware_test_id="$(urlencode "$2")"
+      local data="$3"
+      [ -z "$hardware_test_id" ] && return
+      [ -z "$data" ] && return
+      command+="-X POST '$api_uri/computer/$mac/hardware_tests/$hardware_test_id/logs' "
+      command+="-H 'Content-Type: application/json' "
+      command+="-d '$data'"
+    ;;
+    test_log_raw)
+      local raw_log_utf8="$(mktemp)"
+      local hardware_test_id="$(urlencode "$2")"
+      local log_item="$3"
+      local data_file="$4"
+      [ -z "$hardware_test_id" ] && return
+      [ -z "$log_item" ] && return
+      [ -z "$data_file" ] && return
+      # convert logfiles to utf8
+      cat $data_file | to_utf8 > $raw_log_utf8
+      command+="-X POST '$api_uri/computer/$mac/hardware_tests/$hardware_test_id/logs' "
+      command+="-d 'log_item=$log_item' "
+      command+="--data-urlencode 'log_item_value@$raw_log_utf8'"
+    ;;
+    finished)
+      local hardware_test_id="$(urlencode "$2")"
+      [ -z "$hardware_test_id" ] && return
+      command+="-X POST '$api_uri/computer/$mac/hardware_tests/$hardware_test_id/finish'"
+    ;;
+    update_message)
+      local hardware_test_id="$(urlencode "$2")"
+      local message="$3"
+      [ -z "$hardware_test_id" ] && return
+      [ -z "$message" ] && return
+      command+="-X PATCH '$api_uri/computer/$mac/hardware_tests/$hardware_test_id' "
+      command+="-d 'message=$message'"
+    ;;
+    update_status)
+      local hardware_test_id="$(urlencode "$2")"
+      local hardware_test_state="$3"
+      [ -z "$hardware_test_id" ] && return
+      [ -z "$hardware_test_state" ] && return
+      command+="-X PATCH '$api_uri/computer/$mac/hardware_tests/$hardware_test_id' "
+      command+="-d 'hardware_test_state=$hardware_test_state'"
+    ;;
+    id_based_summary)
+      local data="$2"
+      [ -z "$data" ] && return
+      command+="-X POST '$api_uri/computer/$mac/id_based_summary' "
+      command+="-d '$data'"
+    ;;
+    cattr)
+      local computer_item="$2"
+      local item_value="${3}"
+      [ -z "$computer_item" ] && return
+      item_value="$(pretreat_cattr_item_value "$computer_item" "$item_value")"
+      [[ -z "${item_value//[[:space:]]/}" ]] && return
+      command+="-X POST '$api_uri/computer/$mac/attributes' "
+      command+="-d 'computer_item=$computer_item' "
+      command+="-d 'item_value=$item_value'"
+    ;;
+    get-manufacturer)
+      local serial="$2"
+      [ -z "$serial" ] && return
+      command+="-X GET '$api_uri/computer/$mac/hardware/$serial' "
+    ;;
+    pnp_test)
+      command+="-X POST '$api_uri/computer/$mac/pnp_test'"
+    ;;
+    *)
+      echo 'ERROR'
+    ;;
+  esac
+
+  local http_code="$(eval "$command")"
+  local response="$(cat "$temp")"
+
+  while (( http_code != 200 && http_code != 201 && http_code != 204 )); do
+    log "$response" "${FUNCNAME[0]} $1 RZ-ADMIN returned $http_code" "$command"
+
+    [ "$1" == "get-manufacturer" ] && break
+
+    # sleep 30 plus up to 10s
+    sleep=$((30+(RANDOM%10)))
+    while read line; do
+      line="${line,,}"
+      [[ "${line//[$'\r\n']}" =~ ^retry-after:\ ([0-9]+)$ ]] || continue
+      # sleep at least 30s
+      ((${BASH_REMATCH[1]} >= sleep)) || continue
+      # sleep only up to 5m
+      ((${BASH_REMATCH[1]} <= 300)) || continue
+      # add up to 10s
+      sleep=$((${BASH_REMATCH[1]}+(RANDOM%10)))
+      break
+    done < "$header_temp"
+
+    sleep $sleep
+
+    http_code="$(eval "$command")"
+    response="$(cat "$temp")"
+  done
+
+  rm "$temp"
+  rm "$header_temp"
+
+  if [ -n "$raw_log_utf8" ]; then
+    rm $raw_log_utf8
+  fi
+
+  log "$response" "${FUNCNAME[0]} $1" "$command"
+  echo "$response"
+}
+
+function log(){
+  local return_value="$1"
+  local func_name="$2"
+  local command="$3"
+
+  DATE="$(date -Iseconds)"
+  printf "[%s] ---- %-15s ---- %-38s ---- %s\n" "$DATE" "$return_value" "$func_name" "$command" >> $LOGDIR/$RLOGFILE
+}
+
+arr_to_json(){
+  e="$( declare -p $1 )"
+  eval "local -A E=${e#*=}"
+
+  local count=${#E[@]}
+  local key=''
+
+  echo "{"
+  for key in "${!E[@]}"; do
+    if [ "$count" -eq "1" ]; then
+      echo "\"$key\": \"${E[$key]}\""
+    else
+      echo "\"$key\": \"${E[$key]}\","
+    fi
+    count=$((count-1))
+  done
+  echo "}"
+
+}

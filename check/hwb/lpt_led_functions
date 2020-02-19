@@ -1,0 +1,45 @@
+function join { local IFS="$1"; shift; echo "$*"; }
+
+function led_on {
+  ON=$(pport --status | awk '/Activated/ {printf $2}')
+  PORTS="$(join , $(echo $ON | fold -w1)),$1"
+  pport -s $PORTS
+}
+
+function led_off {
+  if pport --status | grep -q "Activated.*$1"; then
+    pport -t $1
+  fi
+
+  if pport --status | grep -q "Activated.*$1"; then
+    pport -t $1
+  fi
+}
+
+function led_blink {
+  pport -t $1 && sleep $2 && pport -t $1
+  sleep $2
+}
+
+function led_status {
+  STATUSNAME=$1
+  INTERVAL=$2
+  while true; do
+    RUNNING=$(join , $(ls /run/hdd_test_status/$STATUSNAME/))
+    if ! [ -z "$RUNNING" ]; then
+      led_blink $RUNNING $INTERVAL
+    else
+      sleep 1
+    fi
+  done
+}
+
+function sas_port {
+  SA=$(cat /sys/block/$1/device/sas_address)
+  P1=$(echo $SA | cut -c3-9)
+  P2=$(echo $SA | cut -c10)
+  P3=$(echo $SA | cut -c11-14)
+  P4=$(echo $SA | cut -c15-18)
+
+  echo "$P1-$P2-$P3-$P4"
+}

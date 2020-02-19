@@ -1,0 +1,11 @@
+#!/bin/bash
+
+main () {
+  local ipmi_mac="$(ipmitool lan print 1 | sed -ne 's/MAC Address.*: \(.*\)$/\1/p')"
+
+  if [ "$ipmi_mac" = "00:00:00:00:00:00" ]; then
+    report error
+  else
+    report ok
+  fi
+}

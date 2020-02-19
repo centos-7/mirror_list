@@ -1,0 +1,5 @@
+/data/*.hddwipe
+/data/hddwipe.*
+/data/hddwipe_*
+/data/linux-2.6.*.tar.bz2
+/data/TESTFILE_*

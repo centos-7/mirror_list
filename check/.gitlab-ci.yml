@@ -1,0 +1,23 @@
+stages:
+  - syntax
+
+shellcheck:
+  image: 
+    name: koalaman/shellcheck-alpine ## official image from the developer of shellcheck
+    entrypoint: [""]
+  stage: syntax
+  tags:
+  - sddc
+  allow_failure: true
+  before_script:
+  - apk add file
+  script:
+  - |
+    for i in $(find ./ -type f -not -path "*/\.*"); do
+      file_type=$(file "${i}" | cut -d ' ' -f2-)
+      if [ "${file_type}" = 'Bourne-Again shell script, ASCII text executable' ]
+      then
+        shellcheck -S warning "${i}" || failed=1 ## || failed=1 prevents gitlab to end after first failed command
+      fi
+    done 
+  - if [[ $failed -eq 1 ]]; then false; fi ## we still want to set the failed state for the job, if any check fails

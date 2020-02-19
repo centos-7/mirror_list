@@ -1,0 +1,3 @@
+KERNEL=="sd?", SUBSYSTEM=="block", ACTION=="add", RUN+="/root/.oldroot/nfs/check/hwb/detect_hdd.sh add %k %p"
+
+KERNEL=="sd?", SUBSYSTEM=="block", ACTION=="remove", RUN+="/root/.oldroot/nfs/check/hwb/detect_hdd.sh remove %k %p"

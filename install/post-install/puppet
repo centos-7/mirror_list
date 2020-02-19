@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# collect all necessary data and set variables
+init() {
+  pkg_manager=/usr/bin/apt
+  puppet_exe=/opt/puppetlabs/bin/puppet
+}
+
+# get official puppet repo key, use repo and update sources
+set_repo() {
+  $pkg_manager update
+  $pkg_manager install -y lsb-release apt-transport-https gnupg2
+  wget -O - https://apt.puppetlabs.com/DEB-GPG-KEY-puppet | apt-key add -
+  echo "deb https://apt.puppetlabs.com/ `lsb_release -c | awk '{print $2}'` puppet6" > /etc/apt/sources.list.d/puppet.list
+  $pkg_manager update
+}
+
+# install latest puppet-agent
+install_puppet() {
+  $pkg_manager install -y puppet-agent
+}
+
+# unset puppet repo, it will be managed via puppet later
+unset_puppet_repo() {
+  rm /etc/apt/sources.list.d/puppet.list
+  $pkg_manager update -qq
+}
+
+# place rudimental puppet config
+set_puppet_config() {
+  cat << EOF > /etc/puppetlabs/puppet/puppet.conf
+[main]
+vardir  = /var/lib/puppet
+ssldir  = /var/lib/puppet/ssl
+
+[agent]
+report = true
+EOF
+}
+
+# print out a final message
+finish() {
+  bold=$(tput bold)
+  echo -e "\n\n${bold}Puppet was installed properly. Please reboot the system now.\nAfter bootup don't forget to sign the certificate on your puppet server."
+}
+
+init
+set_repo
+install_puppet
+unset_puppet_repo
+set_puppet_config
+systemctl disable puppet.service
+finish

@@ -1,0 +1,75 @@
+#!/bin/bash
+
+#
+# starts installimage in a new screen session
+# and reboots the system on success
+#
+# (c) 2007-2016, Hetzner Online AG
+#
+
+
+
+TIMEOUT=20
+scriptdir="$(dirname "$0")"
+INSTALLIMAGE="$scriptdir/installimage"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export LANG="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"
+
+case $1 in
+
+  start)
+    # start installimage script and reboot if successful
+    #
+    shift
+    until false ; do
+
+      $INSTALLIMAGE "$@" ; EXITCODE=$?
+
+      if [ $EXITCODE -eq 0 ] ; then
+        echo -e "\n\n\n"
+        echo "===>  Installation completed successfully."
+        echo "The system will be restarted in $TIMEOUT seconds!"
+        echo -n "Press any key to stop the reboot: "
+        for ((i=1; i<=TIMEOUT; i++)); do
+          echo -n "."
+          read -r -n1 -t1 key
+          if [ "$key" ] ; then
+            echo -e "\n\n"
+            echo "Reboot cancelled."
+            echo ""
+            exec /bin/bash
+            exit 0
+          fi
+        done
+        echo -e "\n\n"
+        echo "System is now rebooting..."
+        reboot
+        sleep 60
+      else
+        echo -e "\n\n\n"
+        echo "===>  An error has occurred."
+        echo "Launching shell ..."
+        echo "After exiting the shell, installimage will be restarted."
+        /bin/bash
+      fi
+    
+    done
+  ;;
+
+  *)
+    # if we were called without the parameter 'start', restart ourself in a new screen
+    #
+    {
+      echo -e "\n\n"
+      echo "NOTICE:"
+      echo "-------"
+      echo "installimage was launched in a screen session."
+      echo "To connect to the screen sesson run 'screen -x' ..." 
+    } >>/etc/motd
+    screen -AS installimage "$0" start "$@"
+  ;;
+
+esac
+
+# vim: ai:ts=2:sw=2:et

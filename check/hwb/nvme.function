@@ -1,0 +1,84 @@
+function led {
+
+slot=$1
+state=$2
+
+case "$state" in
+        off)
+            stateid=00
+            ;;
+        slow)
+            stateid=01
+            ;;
+        medium)
+            stateid=02
+            ;;
+        fast)
+            stateid=04
+            ;;
+        on)
+            stateid=ff
+            ;;
+        *)
+            echo "unknown state $state"
+            exit 1
+            ;;
+esac
+
+case "$slot" in
+        20)
+            bp=c0
+            id=00
+            ;;
+        19)
+            bp=c0
+            id=01
+            ;;
+        65)
+            bp=c0
+            id=02
+            ;;
+        66)
+            bp=c0
+            id=03
+            ;;
+        67)
+            bp=c2
+            id=00
+            ;;
+        68)
+            bp=c2
+            id=01
+            ;;
+        33)
+            bp=c2
+            id=02
+            ;;
+        34)
+            bp=c2
+            id=03
+            ;;
+        35)
+            bp=c2
+            id=04
+            ;;
+        36)
+            bp=c2
+            id=05
+            ;;
+        37)
+            bp=c2
+            id=06
+            ;;
+        38)
+            bp=c2
+            id=07
+            ;;
+        *)
+            echo "unknown slot $slot"
+            exit 1
+            ;;
+esac
+
+ipmitool raw 0x06 0x52 0x03 0x$bp 0x00 0x4d 0x$id 0x$stateid
+}
