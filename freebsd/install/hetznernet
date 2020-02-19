@@ -1,0 +1,28 @@
+#!/bin/sh
+
+#
+# script which sets default gateway for own subnet
+# should be placed into /etc/rc.d
+#
+
+# PROVIDE: hetznernet
+# REQUIRE: NETWORKING
+
+. /etc/rc.subr
+
+name="hetznernet"
+rcvar=`set_rcvar`
+start_cmd="${name}_start"
+stop_cmd=":"
+
+load_rc_config $name
+eval "${rcvar}=\${${rcvar}:-'YES'}"
+
+hetznernet_start()
+{
+    echo "Setting gateway for own subnet"
+    route del -net ###NET### -netmask ###NETMASK### >/dev/null 2>&1
+    route add -host ###GATEWAY### -interface ###INTERFACE### >/dev/null 2>&1
+}
+
+run_rc_command "$1"

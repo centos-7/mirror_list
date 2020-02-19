@@ -1,0 +1,95 @@
+#!/bin/sh
+echo "Welcome to the Hetzner configuration tool for FreeBSD."
+echo ""
+
+if [ ! -e /mnt/boot/kernel ]; then
+	echo "FreeBSD installation could not be found in /mnt"
+	exit 1
+fi
+
+if [ -e /mnt/etc/resolv.conf ]; then
+	echo "Your FreeBSD installation has already been configured."
+	exit 1
+fi
+
+if [ ! -e /mnt/boot/kernel/kernel ]; then
+	cp -Rp /mnt/boot/GENERIC/* /mnt/boot/kernel/
+fi
+
+valid=0
+while [ $valid -eq 0 ]; do
+	echo -n "Hostname: "
+	read hostname
+
+	regexp="^[a-zA-Z0-9\.-]+$"
+	if ! echo $hostname | grep -E $regexp >/dev/null; then
+		echo "Invalid hostname (regexp: $regexp). Please try again."
+	else
+		valid=1
+	fi
+done
+
+echo ""
+
+if ! chroot /mnt passwd; then
+	echo "Could not set root password."
+	exit 1
+fi
+
+echo ""
+
+echo -n "Configuring rc.conf... "
+cat > /mnt/etc/rc.conf << EOF
+hostname="$hostname"
+sshd_enable="YES"
+sendmail_enable="NONE"
+zfs_enable="YES"
+ntpd_enable="YES"
+EOF
+echo "DONE"
+
+echo -n "Configuring loader.conf... "
+cat >> /mnt/boot/loader.conf << EOF
+geom_mirror_load="YES"
+EOF
+echo "DONE"
+
+for interface in `ifconfig -l`; do
+	if [ "$interface" = "lo0" ]; then
+		continue
+	fi
+
+	cat >> /mnt/etc/rc.conf << EOF
+ifconfig_$interface="DHCP"
+EOF
+done
+
+echo "DONE"
+
+echo -n "Enabling SSH login for root... "
+if ! grep "PermitRootLogin yes" /mnt/etc/ssh/sshd_config >/dev/null; then
+	echo "PermitRootLogin yes" >> /mnt/etc/ssh/sshd_config
+fi
+echo "DONE"
+
+echo -n "Configuring resolv.conf... "
+cp /etc/resolv.conf /mnt/etc/
+echo "DONE"
+
+if [ ! -e /mnt/etc/fstab ]; then
+	echo "Press ENTER to configure your /etc/fstab using vi"
+	read dummy
+	cat > /mnt/etc/fstab << EOF
+# This is an example fstab file. In all likelyhood you will have
+# to change at least some of the values (e.g. the device names).
+
+# dev              mnt       type    opt       dump   pass
+/dev/ad0s1b        none      swap    sw        0      0
+/dev/ad0s1a        /         ufs     rw        1      1
+EOF
+	vi /mnt/etc/fstab
+fi
+
+echo ""
+echo "Congratulations! The configuration has been completed successfully."
+echo "You can now use 'reboot' to boot your newly installed FreeBSD system."
